@@ -335,9 +335,16 @@ namespace Server.CustomBots
                         $"[MoongateTravel] {bot.Name}: handoff failed: {ex.Message}");
                 }
 
-                Console.WriteLine(
-                    $"[MoongateTravel] {bot.Name}: {fromMoongateName} -> {target.Name}" +
-                    (resumeDestination != null ? $" (continuing to '{resumeDestination}')" : ""));
+                // Same per-trip travel log as MagicTravel; shares its
+                // Verbose flag (both are "bot magic transport" logging
+                // from a GM's point of view) - off by default to avoid
+                // flooding the log with hundreds of bots gating around.
+                if (MagicTravel.Verbose)
+                {
+                    Console.WriteLine(
+                        $"[MoongateTravel] {bot.Name}: {fromMoongateName} -> {target.Name}" +
+                        (resumeDestination != null ? $" (continuing to '{resumeDestination}')" : ""));
+                }
             });
 
             return true;

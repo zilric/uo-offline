@@ -35,8 +35,12 @@ namespace Server.CustomBots
         // (e.g. while debugging or doing bulk world edits).
         public static bool Enabled = true;
 
-        // Verbose logs every assignment / transition / decision.
-        public static bool Verbose = true;
+        // Verbose logs every assignment / transition / decision. Off by
+        // default - with a populated bot pool this floods the log within
+        // minutes. Toggle with [SetBotVerbose true/false (see
+        // BotDiagnosticCommands) or [SetLifecycle, which only controls
+        // whether transitions run at all, not their logging.
+        public static bool Verbose = false;
 
         // How often the manager evaluates bots.
         public static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);

@@ -36,6 +36,11 @@ namespace Server.CustomBots
     {
         public override string SerializableName => "Gatherer";
 
+        // Routine gather-site telemetry. Off by default - see
+        // BotDiagnosticCommands' [SetBotVerbose, which flips this together
+        // with the other bot subsystem log flags.
+        public static bool Verbose = false;
+
         // Swing cadence and yield.
         private static readonly TimeSpan SwingInterval   = TimeSpan.FromSeconds(4);
         private static readonly TimeSpan HarvestInterval = TimeSpan.FromSeconds(35);
@@ -288,8 +293,11 @@ namespace Server.CustomBots
                 // polygon is painted over unwalkable ground. Don't stand in
                 // the wilderness pretending to mine; go somewhere else.
                 StopStepping();
-                Console.WriteLine($"[gather] {bot.Name} couldn't get inside " +
-                                  $"'{_site.Name}' — leaving instead of working outside it");
+                if (Verbose)
+                {
+                    Console.WriteLine($"[gather] {bot.Name} couldn't get inside " +
+                                      $"'{_site.Name}' — leaving instead of working outside it");
+                }
                 bot.Behavior = BehaviorRegistry.Create("Traveler");
                 return;
             }

@@ -86,6 +86,17 @@ namespace Server.CustomBots
         // …and of those, how many a gate-capable mage opens a gate for.
         public const double GateShare = 0.4;
 
+        // ---- Diagnostics ----
+        // Per-trip travel-decision logging (recall/gate outcome, handoff
+        // to the next Traveler). Off by default - with hundreds of bots
+        // rolling trips constantly this floods the console/log in
+        // minutes. Toggle with [SetBotVerbose true/false (see
+        // BotDiagnosticCommands), which flips this together with
+        // TravelerBehavior.Verbose since both are "bot travel logging"
+        // from a GM's point of view. Actual failures (caught exceptions)
+        // are always logged regardless of this flag.
+        public static bool Verbose = false;
+
         private const int GateSound    = 0x20E;
 
         // Cast beat: mantra -> effect/move. Roughly a real cast delay.
@@ -570,9 +581,12 @@ namespace Server.CustomBots
                 {
                     try { _bot.Say("cant get this spell off"); } catch { }
                 }
-                Console.WriteLine(
-                    $"[MagicTravel] {_bot.Name}: recall wouldn't take " +
-                    $"(attempt {_attempt}, dest '{_destName ?? "fresh"}' at {_landing}) — continuing on foot");
+                if (Verbose)
+                {
+                    Console.WriteLine(
+                        $"[MagicTravel] {_bot.Name}: recall wouldn't take " +
+                        $"(attempt {_attempt}, dest '{_destName ?? "fresh"}' at {_landing}) — continuing on foot");
+                }
                 try
                 {
                     _bot.Behavior = RedTerritory.TravelBrain(_bot, _destName);
@@ -706,8 +720,11 @@ namespace Server.CustomBots
                 return;
             }
 
-            Console.WriteLine(
-                $"[MagicTravel] {bot.Name}: {how} -> {destName ?? "(fresh pick)"}");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[MagicTravel] {bot.Name}: {how} -> {destName ?? "(fresh pick)"}");
+            }
         }
 
         // Words of power + a casting sweep. Visual only — must never

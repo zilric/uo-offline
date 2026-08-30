@@ -39,6 +39,13 @@ namespace Server.CustomBots
 
     public static class BotSupplies
     {
+        // Routine per-errand telemetry (low-supply notice, restock
+        // transaction). Off by default - with a populated bot pool every
+        // hunter/crawler/etc. runs this constantly. Toggle with
+        // [SetBotVerbose true/false (see BotDiagnosticCommands). Actual
+        // failures (caught exceptions) are always logged regardless.
+        public static bool Verbose = false;
+
         // ---- Thresholds (below = time to go shopping) and refill targets ----
         private const int AmmoLow = 25,     AmmoFull = 150;
         private const int BoltFull = 60;
@@ -237,8 +244,11 @@ namespace Server.CustomBots
             }
 
             bot.NextSupplyErrandAt = Core.Now + ErrandCooldown;
-            Console.WriteLine(
-                $"[supplies] {bot.Name} is low on {need} — heading to '{best.Name}'");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[supplies] {bot.Name} is low on {need} — heading to '{best.Name}'");
+            }
             return best.Name;
         }
 
@@ -342,11 +352,14 @@ namespace Server.CustomBots
                 }
             }
 
-            Console.WriteLine(
-                $"[supplies] {bot.Name} restocked {string.Join(", ", bought)} " +
-                $"at {at} (-{cost}gp; arrows now {pack.GetAmount(typeof(Arrow))}, " +
-                $"bandages {pack.GetAmount(typeof(Bandage))}, " +
-                $"scrolls {pack.GetAmount(typeof(RecallScroll))})");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[supplies] {bot.Name} restocked {string.Join(", ", bought)} " +
+                    $"at {at} (-{cost}gp; arrows now {pack.GetAmount(typeof(Arrow))}, " +
+                    $"bandages {pack.GetAmount(typeof(Bandage))}, " +
+                    $"scrolls {pack.GetAmount(typeof(RecallScroll))})");
+            }
         }
 
         // Refill a stackable to `target`; returns how many were added.

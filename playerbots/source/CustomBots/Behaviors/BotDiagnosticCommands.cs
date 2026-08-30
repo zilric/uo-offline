@@ -5,7 +5,15 @@
 // current destination + leg progress. Use this to verify travelers are
 // actually using the waypoint graph correctly.
 //
-// [SetBotVerbose true|false — Toggle TravelerBehavior console logging.
+// [SetBotVerbose true|false — Master switch for every gated PlayerBot
+// subsystem's console/log telemetry: navigation (TravelerBehavior),
+// magic travel (MagicTravel/MoongateTravel), combat engagement
+// (AdventurerBehavior.CombatDebug), lifecycle transitions
+// (BotLifecycleManager), supply errands (BotSupplies), gathering shifts
+// (GathererBehavior/BotPackAnimals), taming (BotCombatPets), and stuck/
+// wedge extraction (BotStuckEscape). All off by default - with hundreds
+// of active bots this floods modernuo.log within minutes. Run it with no
+// argument to see every flag's current state.
 // =========================================================================
 
 using System;
@@ -105,12 +113,15 @@ namespace Server.CustomBots
         }
 
         [Usage("SetBotVerbose true|false")]
-        [Description("Toggle TravelerBehavior console logging.")]
+        [Description("Master switch for every gated PlayerBot subsystem's console/log telemetry.")]
         public static void SetBotVerbose_OnCommand(CommandEventArgs e)
         {
             if (e.Length < 1)
             {
-                e.Mobile.SendMessage($"Current TravelerBehavior.Verbose = {TravelerBehavior.Verbose}");
+                foreach (var line in VerboseStatusLines())
+                {
+                    e.Mobile.SendMessage(line);
+                }
                 e.Mobile.SendMessage("Usage: [SetBotVerbose true   or   [SetBotVerbose false");
                 return;
             }
@@ -129,8 +140,38 @@ namespace Server.CustomBots
                 return;
             }
 
+            // One switch for every gated bot subsystem's telemetry. A GM
+            // toggling this wants "bot noise" on or off in general, not to
+            // remember and flip a dozen separate per-subsystem flags.
             TravelerBehavior.Verbose = v.Value;
-            e.Mobile.SendMessage($"TravelerBehavior.Verbose = {TravelerBehavior.Verbose}");
+            MagicTravel.Verbose = v.Value;
+            AdventurerBehavior.CombatDebug = v.Value;
+            BotLifecycleManager.Verbose = v.Value;
+            BotSupplies.Verbose = v.Value;
+            GathererBehavior.Verbose = v.Value;
+            BotPackAnimals.Verbose = v.Value;
+            BotCombatPets.Verbose = v.Value;
+            BotStuckEscape.Verbose = v.Value;
+
+            foreach (var line in VerboseStatusLines())
+            {
+                e.Mobile.SendMessage(line);
+            }
         }
+
+        // One line per gated flag, shared by the no-argument status view
+        // and the confirmation printed after a toggle.
+        private static string[] VerboseStatusLines() => new[]
+        {
+            $"TravelerBehavior.Verbose = {TravelerBehavior.Verbose}  (foot navigation)",
+            $"MagicTravel.Verbose = {MagicTravel.Verbose}  (recall/gate/moongate travel)",
+            $"AdventurerBehavior.CombatDebug = {AdventurerBehavior.CombatDebug}  (combat engagement)",
+            $"BotLifecycleManager.Verbose = {BotLifecycleManager.Verbose}  (personality/behavior transitions)",
+            $"BotSupplies.Verbose = {BotSupplies.Verbose}  (supply errands/restock)",
+            $"GathererBehavior.Verbose = {GathererBehavior.Verbose}  (gather-site telemetry)",
+            $"BotPackAnimals.Verbose = {BotPackAnimals.Verbose}  (pack animal shifts)",
+            $"BotCombatPets.Verbose = {BotCombatPets.Verbose}  (taming/stabling)",
+            $"BotStuckEscape.Verbose = {BotStuckEscape.Verbose}  (stuck/wedge extraction)",
+        };
     }
 }

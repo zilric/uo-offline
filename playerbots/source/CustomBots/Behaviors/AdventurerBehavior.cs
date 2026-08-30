@@ -589,9 +589,12 @@ namespace Server.CustomBots
                                  tbc.Combatant is PlayerBot &&
                                  tbc.Combatant != bot;
                 TryEventLine(bot, 0.4, assisting ? "combat_assist" : "combat_engage");
-                Console.WriteLine(
-                    $"[Bot {bot.Name}] {(assisting ? "assisting against" : "engaging")} " +
-                    $"'{target.Name}'");
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bot {bot.Name}] {(assisting ? "assisting against" : "engaging")} " +
+                        $"'{target.Name}'");
+                }
 
                 bot.Combatant = target;
                 // Route by combat style. A ranged bot (mage/archer) must
@@ -657,8 +660,11 @@ namespace Server.CustomBots
                 _nextSupplyThink = Core.Now + TimeSpan.FromMinutes(2);
                 if (BotSupplies.PickErrandDestination(bot) is string errand)
                 {
-                    Console.WriteLine(
-                        $"[supplies] {bot.Name} breaks off the hunt to restock");
+                    if (BotSupplies.Verbose)
+                    {
+                        Console.WriteLine(
+                            $"[supplies] {bot.Name} breaks off the hunt to restock");
+                    }
                     bot.Behavior = new TravelerBehavior { DestinationName = errand };
                     return;
                 }
@@ -998,12 +1004,13 @@ namespace Server.CustomBots
         // How many of the strongest castable entries stay in the pick pool.
         private const int AttackPoolDepth = 4;
 
-        // Console diagnostics for the high-volume combat events (per-cast
-        // spell picks). The rare events (engage, flee, target switch) are
-        // always logged. Flip to false once the combat pass is verified.
-        // Verbose per-cast spell logging. Runtime-toggleable via
-        // [CombatDebug on|off (no rebuild needed).
-        public static bool CombatDebug = true;
+        // Console diagnostics for combat events — target engagement,
+        // per-cast spell picks, resting. Off by default - with a
+        // populated bot pool constantly fighting this floods the log
+        // within minutes. Runtime-toggleable via [CombatDebug on|off (no
+        // rebuild needed), or [SetBotVerbose, which flips this together
+        // with the other bot subsystem log flags.
+        public static bool CombatDebug = false;
 
         private void BeginCast(PlayerBot bot, Mobile foe, bool pointBlank = false)
         {
@@ -1255,8 +1262,11 @@ namespace Server.CustomBots
                         {
                             bot.Combatant = null; // slip out while they brawl
                         }
-                        Console.WriteLine(
-                            $"[Bard] {bot.Name}: provoked {a.Name} onto {b.Name}");
+                        if (CombatDebug)
+                        {
+                            Console.WriteLine(
+                                $"[Bard] {bot.Name}: provoked {a.Name} onto {b.Name}");
+                        }
                         return;
                     }
                 }
@@ -1283,9 +1293,12 @@ namespace Server.CustomBots
                 {
                     bot.Combatant = null;
                 }
-                Console.WriteLine(
-                    $"[Bard] {bot.Name}: peaced {attacker.Name} off " +
-                    $"({(int)secs}s of calm)");
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bard] {bot.Name}: peaced {attacker.Name} off " +
+                        $"({(int)secs}s of calm)");
+                }
             }
         }
 
@@ -1928,9 +1941,12 @@ namespace Server.CustomBots
             if (better != null)
             {
                 _nextSwitchAllowed = Core.Now + TimeSpan.FromSeconds(5);
-                Console.WriteLine(
-                    $"[Bot {bot.Name}] switching target: '{current.Name}' -> " +
-                    $"'{better.Name}' ({betterDist} tiles, attacking me)");
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bot {bot.Name}] switching target: '{current.Name}' -> " +
+                        $"'{better.Name}' ({betterDist} tiles, attacking me)");
+                }
                 return better;
             }
 
@@ -2322,9 +2338,12 @@ namespace Server.CustomBots
             // line tells the two apart: near-full HP = overwhelming dare,
             // low HP = retreat threshold.)
             TryEventLine(bot, 0.5, "combat_flee");
-            Console.WriteLine(
-                $"[Bot {bot.Name}] fleeing from '{threat?.Name}' " +
-                $"(hp {bot.Hits}/{bot.HitsMax})");
+            if (CombatDebug)
+            {
+                Console.WriteLine(
+                    $"[Bot {bot.Name}] fleeing from '{threat?.Name}' " +
+                    $"(hp {bot.Hits}/{bot.HitsMax})");
+            }
 
             bot.Combatant = null;
             _chaseFoe  = null;

@@ -464,6 +464,14 @@ namespace Server.CustomBots
     // =====================================================================
     public static class BotStuckEscape
     {
+        // Routine extraction telemetry. Off by default - a dense bot pool
+        // wedges (crowd box-ins, bad teleport landings) often enough that
+        // this floods the console at scale. The underlying data isn't
+        // lost when quiet: every extraction still goes through
+        // StuckTelemetry.Record below, so hotspot reports stay accurate.
+        // Toggle with [SetBotVerbose true/false (see BotDiagnosticCommands).
+        public static bool Verbose = false;
+
         // Single-step sidestep — try each compass direction in random
         // order, take the first that succeeds. Returns false when all 8
         // are blocked (the physically-wedged tell).
@@ -521,9 +529,12 @@ namespace Server.CustomBots
                         int z = map.GetAverageZ(x, y);
                         if (map.CanSpawnMobile(x, y, z))
                         {
-                            Console.WriteLine(
-                                $"[stuck] {bot.Name}: WEDGED at ({bot.X},{bot.Y},{bot.Z}) " +
-                                $"({context}) — extracted to ({x},{y},{z})");
+                            if (Verbose)
+                            {
+                                Console.WriteLine(
+                                    $"[stuck] {bot.Name}: WEDGED at ({bot.X},{bot.Y},{bot.Z}) " +
+                                    $"({context}) — extracted to ({x},{y},{z})");
+                            }
                             // Record BEFORE the move so the hotspot is the
                             // wedge, not where the extraction dropped it.
                             StuckTelemetry.Record(bot, "wedge_extract",
@@ -535,9 +546,12 @@ namespace Server.CustomBots
                 }
             }
 
-            Console.WriteLine(
-                $"[stuck] {bot.Name}: WEDGED at ({bot.X},{bot.Y},{bot.Z}) ({context}) " +
-                $"and no valid tile within 10 — leaving for the lifecycle to recycle");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[stuck] {bot.Name}: WEDGED at ({bot.X},{bot.Y},{bot.Z}) ({context}) " +
+                    $"and no valid tile within 10 — leaving for the lifecycle to recycle");
+            }
             StuckTelemetry.Record(bot, "wedge_hopeless", context);
             return false;
         }

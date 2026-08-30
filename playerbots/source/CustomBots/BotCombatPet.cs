@@ -34,6 +34,13 @@ namespace Server.CustomBots
 {
     public static class BotCombatPets
     {
+        // Routine tamer telemetry (claiming a pet, feeding, sicking it on
+        // a target). Off by default - see BotDiagnosticCommands'
+        // [SetBotVerbose. The pet going WILD stays logged regardless — a
+        // tamer permanently losing its pet is a real, uncommon event, not
+        // routine chatter.
+        public static bool Verbose = false;
+
         // Era pet names — what players actually called them.
         private static readonly string[] PetNames =
         {
@@ -132,9 +139,12 @@ namespace Server.CustomBots
             bot.CombatPet = pet;
             _pets.Add(new PetRec { Bot = bot, Pet = pet });
             BotScene.Play((1.5, bot, "all follow me"));
-            Console.WriteLine(
-                $"[tamer] {bot.Name} ({bot.SkillTier}) claims " +
-                $"{pet.Name} the {pet.GetType().Name} from the stables");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[tamer] {bot.Name} ({bot.SkillTier}) claims " +
+                    $"{pet.Name} the {pet.GetType().Name} from the stables");
+            }
             return pet;
         }
 
@@ -317,8 +327,11 @@ namespace Server.CustomBots
                             rec.LastFoe = foe.Serial;
                             rec.NextKillSayAt = Core.Now + TimeSpan.FromSeconds(15);
                             bot.Say("all kill");
-                            Console.WriteLine(
-                                $"[tamer] {bot.Name} sics {pet.Name} on {foe.Name}");
+                            if (Verbose)
+                            {
+                                Console.WriteLine(
+                                    $"[tamer] {bot.Name} sics {pet.Name} on {foe.Name}");
+                            }
                         }
                     }
                     continue; // no bandaging mid-melee — survive first
@@ -389,9 +402,12 @@ namespace Server.CustomBots
                 pet.Animate(3, 5, 1, true, false, 0);
             }
 
-            Console.WriteLine(
-                $"[tamer] {bot.Name} feeds {pet.Name} {feed} rib(s) " +
-                $"(loyalty {pet.Loyalty}/{BaseCreature.MaxLoyalty})");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[tamer] {bot.Name} feeds {pet.Name} {feed} rib(s) " +
+                    $"(loyalty {pet.Loyalty}/{BaseCreature.MaxLoyalty})");
+            }
         }
 
         // BandageContext.BeginHeal(healer, patient) via reflection — same

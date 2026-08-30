@@ -71,6 +71,10 @@ namespace Server.CustomBots
 
     public static class BotPackAnimals
     {
+        // Routine shift-start telemetry (every miner/lumberjack clocking
+        // in). Off by default - see BotDiagnosticCommands' [SetBotVerbose.
+        public static bool Verbose = false;
+
         // Working animals get working names — a real player renamed the
         // beast the day they bought it, and the rename is what makes the
         // spoken pet commands ("Bessie follow me") read right.
@@ -111,9 +115,12 @@ namespace Server.CustomBots
 
             bot.PackAnimal = beast;
             BotScene.Play((1.2, bot, $"{beast.Name} follow me"));
-            Console.WriteLine(
-                $"[gather] {bot.Name} brought a pack " +
-                $"{(llama ? "llama" : "horse")} for the shift at ({bot.X},{bot.Y})");
+            if (Verbose)
+            {
+                Console.WriteLine(
+                    $"[gather] {bot.Name} brought a pack " +
+                    $"{(llama ? "llama" : "horse")} for the shift at ({bot.X},{bot.Y})");
+            }
             return beast;
         }
 

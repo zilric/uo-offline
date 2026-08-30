@@ -51,10 +51,12 @@ namespace Server.CustomBots
         public bool Subordinate { get; set; }
 
         // ---- Diagnostics ----
-        // When true, log state transitions to the server console so you can
-        // watch bots' navigation decisions live via tail -f modernuo.log.
-        // Toggle with [SetBotVerbose true/false  (see TravelerVerboseCommand).
-        public static bool Verbose = true;
+        // When true, log state transitions (plan legs, arrival, reroute) to
+        // the server console so you can watch bots' navigation decisions
+        // live via tail -f modernuo.log. Off by default - with hundreds of
+        // active Travelers this floods the log within minutes. Toggle with
+        // [SetBotVerbose true/false (see BotDiagnosticCommands).
+        public static bool Verbose = false;
 
         private static void Log(PlayerBot bot, string msg)
         {
