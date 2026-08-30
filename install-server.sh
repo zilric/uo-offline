@@ -29,11 +29,19 @@
 # change the default admin password after your first login.
 #
 # Where it installs:
-#   ./install-server.sh --dir ./server        (or INSTALL_DIR=./server)
-#   ./install-server.sh --install-root /path   (legacy name, still works)
-#   Default: ./server-runtime under the current directory — no $HOME
-#   path is assumed, so this can be run straight out of a project
-#   checkout and everything it creates stays inside the workspace.
+#   Always ./server-runtime next to this script (the repo root). Not
+#   configurable — no --dir/--install-root flag, no INSTALL_DIR/
+#   INSTALL_ROOT override. Every install/update/uninstall operates on
+#   exactly one, predictable, workspace-local path.
+#
+# Lifecycle actions:
+#   ./install-server.sh install     Set up a new server in ./server-runtime
+#   ./install-server.sh update      Rebuild ModernUO/PlayerBots; keeps
+#                                    saves, accounts, Configuration/, and
+#                                    uo-data/ untouched
+#   ./install-server.sh uninstall   Remove ./server-runtime
+#   ./install-server.sh             Interactive menu if no action is given
+#   --force / -y                    Skip confirmation prompts
 #
 # Root/sudo is optional, not required:
 #   - If a compatible dotnet is already on $PATH, or every native package
@@ -55,63 +63,78 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
-# Paths and URLs
+# Pretty output (defined early - the argument parser below uses die()).
 # ---------------------------------------------------------------------------
-# Where everything goes. Override it any of these ways (highest priority
-# first): --dir (or --install-root), INSTALL_DIR env, INSTALL_ROOT env
-# (legacy name). Everything below hangs off this, so it has to be settled
-# before they are.
-_DIR_FLAG=""
-for _arg_i in $(seq 1 $#); do
-  case "${!_arg_i}" in
-    --install-root|--dir)
-      _next=$((_arg_i + 1))
-      _DIR_FLAG="${!_next:-}"
-      ;;
-    --install-root=*|--dir=*)
-      _DIR_FLAG="${!_arg_i#*=}"
-      ;;
-    --no-map-editor)
-      INSTALL_MAP_EDITOR=0
-      ;;
-    --skip-deps)
-      SKIP_DEPS=1
-      ;;
-    --no-root)
-      NO_ROOT=1
-      ;;
-  esac
-done
+banner() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
+say()    { printf '\033[0;36m--> %s\033[0m\n' "$*"; }
+ok()     { printf '\033[0;32m[OK]\033[0m %s\n' "$*"; }
+warn()   { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; }
+die()    { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# ---------------------------------------------------------------------------
+# Lifecycle action & flags
+# ---------------------------------------------------------------------------
+ACTION=""
+FORCE="${FORCE:-0}"
 # The map editor is a builder's tool - waypoints, spawns, a live view of the
 # bots - not something you need in order to play. On by default, off with
-# --no-map-editor or INSTALL_MAP_EDITOR=0.
+# --no-map-editor.
 INSTALL_MAP_EDITOR="${INSTALL_MAP_EDITOR:-1}"
 # --skip-deps / --no-root: see "Root/sudo is optional" above. install_deps
 # reads these.
 SKIP_DEPS="${SKIP_DEPS:-0}"
 NO_ROOT="${NO_ROOT:-0}"
-unset _arg_i _next
 
-# No more hardcoding a $HOME path: point this at your project checkout (or
-# leave it at the default) and everything - the ModernUO build, configs,
-# the UO data default, and the copied start.sh/stop.sh - resolves under it.
-INSTALL_ROOT="${_DIR_FLAG:-${INSTALL_DIR:-${INSTALL_ROOT:-$(pwd)/server-runtime}}}"
-unset _DIR_FLAG
-INSTALL_ROOT="${INSTALL_ROOT%/}"
+print_usage() {
+  cat <<USAGE
+Usage: $(basename "$0") [install|update|uninstall] [options]
 
-if [[ "${INSTALL_ROOT}" != /* ]]; then
-  INSTALL_ROOT="$(pwd)/${INSTALL_ROOT}"
-fi
+Actions (interactive menu if omitted):
+  install       Set up a new server in ./server-runtime
+  update        Rebuild ModernUO/PlayerBots; keeps saves, accounts,
+                Configuration/, and uo-data/ untouched
+  uninstall     Remove ./server-runtime
+
+Options:
+  --force, -y      Skip confirmation prompts (install-exists / uninstall)
+  --skip-deps      Skip native package installation, assume it's done
+  --no-root        Don't attempt sudo; print packages to install by hand
+  --no-map-editor  Don't install the browser-based map editor
+  -h, --help       Show this help
+USAGE
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    install|--install)     ACTION="install" ;;
+    update|--update)        ACTION="update" ;;
+    uninstall|--uninstall)  ACTION="uninstall" ;;
+    --force|-y)              FORCE=1 ;;
+    --skip-deps)             SKIP_DEPS=1 ;;
+    --no-root)               NO_ROOT=1 ;;
+    --no-map-editor)         INSTALL_MAP_EDITOR=0 ;;
+    -h|--help)               print_usage; exit 0 ;;
+    *) print_usage; die "Unknown argument: ${arg}" ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Paths and URLs
+# ---------------------------------------------------------------------------
+# Locked to ./server-runtime next to this script (the repo root). No
+# --dir/--install-root flag and no INSTALL_DIR/INSTALL_ROOT override - every
+# install/update/uninstall operates on exactly this path, so it's always
+# where an editor opened on the repo expects it to be.
+INSTALL_ROOT="${SCRIPT_DIR}/server-runtime"
 MODERNUO_REPO="https://github.com/modernuo/ModernUO.git"
 MODERNUO_DIR="${INSTALL_ROOT}/ModernUO"
 DIST_DIR="${MODERNUO_DIR}/Distribution"
 CFG_DIR="${DIST_DIR}/Configuration"
 SPAWNERS_DIR="${DIST_DIR}/Spawners/uoclassic"
 
-# Where we point the user if they don't have data files yet. Override with
-# UO_DATA_DEST=/some/path ./install-server.sh
-UO_DATA_DEST="${UO_DATA_DEST:-${INSTALL_ROOT}/uo-data}"
+# Where UO client data files get copied to - fixed, like INSTALL_ROOT.
+# Never symlinked; see copy_uo_data.
+UO_DATA_DIR="${INSTALL_ROOT}/uo-data"
 
 # Nerun's pre-T2A spawn data. ModernUO's [GenerateSpawners command parses
 # the .map format directly.
@@ -145,15 +168,6 @@ SHARD_NAME="UO Offline"
 DOTNET_ROOT="${DOTNET_ROOT:-${HOME}/.dotnet}"
 
 # ---------------------------------------------------------------------------
-# Pretty output
-# ---------------------------------------------------------------------------
-banner() { printf '\n\033[1;36m=== %s ===\033[0m\n' "$*"; }
-say()    { printf '\033[0;36m--> %s\033[0m\n' "$*"; }
-ok()     { printf '\033[0;32m[OK]\033[0m %s\n' "$*"; }
-warn()   { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; }
-die()    { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
-
-# ---------------------------------------------------------------------------
 # Step 1 — Pre-flight checks
 # ---------------------------------------------------------------------------
 preflight() {
@@ -166,8 +180,8 @@ preflight() {
   command -v sudo   >/dev/null \
     || warn "sudo not found — will fall back to printing the packages you need instead of installing them. See --skip-deps/--no-root."
 
-  # The install root can be anywhere, so check it here rather than failing
-  # several steps later with a confusing message.
+  # Check writability here rather than failing several steps later with a
+  # confusing message.
   mkdir -p "${INSTALL_ROOT}" 2>/dev/null \
     || die "Cannot create ${INSTALL_ROOT}. Pick a folder you can write to."
   [[ -w "${INSTALL_ROOT}" ]] \
@@ -516,7 +530,7 @@ ${HOME}/Desktop/Ultima Online Classic
 ${HOME}/Documents/Ultima Online Classic
 ${HOME}/.wine/drive_c/Program Files/EA Games/Ultima Online Classic
 ${HOME}/.wine/drive_c/Program Files (x86)/Electronic Arts/Ultima Online Classic
-${UO_DATA_DEST}
+${UO_DATA_DIR}
 /mnt/uo
 CANDIDATES
 }
@@ -536,37 +550,41 @@ autodetect_uo_data() {
   return 1
 }
 
-# link_uo_data — normalize wherever the real UO data lives into a symlink
-# at ${INSTALL_ROOT}/uo-data, and point UO_DATA at that symlink.
+# copy_uo_data — copy whatever UO asset files exist at $1 straight into
+# ${INSTALL_ROOT}/uo-data (UO_DATA_DIR). No symlinking: ModernUO's data
+# directory ends up a real, self-contained copy inside the workspace.
 #
-# The data directory the operator gives us can be anywhere on disk (an
-# existing client install, a Steam compatdata prefix, /mnt/uo). Referencing
-# it from outside the install root works fine for the server, but leaves
-# nothing to see from an editor opened on INSTALL_ROOT. A symlink keeps
-# config generation pointed at one real location while making the data
-# browsable from inside the workspace.
+# Copies by file pattern rather than the whole tree, so pointing this at a
+# live client install (docs, screenshots, saved characters, the client
+# binary itself) only pulls in the data files ModernUO actually reads.
+# -maxdepth 1 keeps the destination flat - no nested subfolders get
+# created, and re-running (a re-install, or pointing at a newer client)
+# just overwrites the same files in place rather than duplicating anything.
 # ---------------------------------------------------------------------------
-link_uo_data() {
-  local real="$1" link="${INSTALL_ROOT}/uo-data"
+copy_uo_data() {
+  local src="$1"
+  mkdir -p "${UO_DATA_DIR}"
 
   # Already exactly the target location (the default "no data yet" path
-  # writes straight there) - nothing to link.
-  if [[ "$(cd "${real}" 2>/dev/null && pwd)" == "$(cd "${INSTALL_ROOT}" && pwd)/uo-data" ]]; then
-    UO_DATA="${real}"
+  # has the operator drop files straight into UO_DATA_DIR) - nothing to copy.
+  if [[ "$(cd "${src}" 2>/dev/null && pwd)" == "$(cd "${UO_DATA_DIR}" && pwd)" ]]; then
+    UO_DATA="${UO_DATA_DIR}"
     return
   fi
 
-  if [[ -L "${link}" ]]; then
-    rm -f "${link}"
-  elif [[ -e "${link}" ]]; then
-    warn "${link} exists and isn't a symlink; leaving UO data referenced at ${real} directly."
-    UO_DATA="${real}"
-    return
-  fi
+  say "Copying UO data files: ${src} -> ${UO_DATA_DIR}"
+  local copied=0 f
+  while IFS= read -r -d '' f; do
+    cp -f "${f}" "${UO_DATA_DIR}/"
+    copied=$((copied + 1))
+  done < <(find "${src}" -maxdepth 1 -type f \
+    \( -iname '*.mul' -o -iname '*.uop' -o -iname '*.idx' -o -iname '*.def' \
+       -o -iname 'tiledata.*' \) \
+    -print0 2>/dev/null)
 
-  ln -s "${real}" "${link}"
-  ok "Linked UO data into the workspace: ${link} -> ${real}"
-  UO_DATA="${link}"
+  [[ "${copied}" -gt 0 ]] || warn "No matching UO data files (*.mul/*.uop/*.idx/*.def) found in ${src}."
+  ok "Copied ${copied} file(s) into ${UO_DATA_DIR}."
+  UO_DATA="${UO_DATA_DIR}"
 }
 
 # ---------------------------------------------------------------------------
@@ -581,16 +599,16 @@ link_uo_data() {
 #      or data files somewhere, and either take a path from them or point
 #      them at https://uo.com/download and wait.
 #
-# Either way, UO_DATA ends up normalized to a symlink inside INSTALL_ROOT
-# (see link_uo_data) so it's visible from an editor opened on the install
-# directory even when the real files live elsewhere.
+# Either way, the matching files end up physically copied into UO_DATA_DIR
+# (see copy_uo_data) - a real copy inside the workspace, not a symlink out
+# to wherever the original client lives.
 # ---------------------------------------------------------------------------
 resolve_uo_data() {
   banner "Locating UO game data"
 
   if autodetect_uo_data; then
     ok "Found existing UO data: ${UO_DATA}"
-    link_uo_data "${UO_DATA}"
+    copy_uo_data "${UO_DATA}"
     return
   fi
 
@@ -625,32 +643,32 @@ resolve_uo_data() {
       done
       ;;
     *)
-      mkdir -p "${UO_DATA_DEST}"
+      mkdir -p "${UO_DATA_DIR}"
       echo ""
       say "Please download and install the official classic client from:"
       say "    https://uo.com/download"
       say "(natively, or via Wine, or on another machine — however is easiest)"
       say "then copy the game's .mul / .uop data files into:"
-      say "    ${UO_DATA_DEST}"
+      say "    ${UO_DATA_DIR}"
       echo ""
       while true; do
         read -r -p "Press Enter once the files are there, or type 'exit' to quit and finish this later: " response
         if [[ "${response}" == "exit" ]]; then
-          say "Exiting. Re-run this installer once the UO data files are in ${UO_DATA_DEST}."
+          say "Exiting. Re-run this installer once the UO data files are in ${UO_DATA_DIR}."
           exit 0
         fi
-        if uo_data_problem "${UO_DATA_DEST}"; then
-          UO_DATA="${UO_DATA_DEST}"
+        if uo_data_problem "${UO_DATA_DIR}"; then
+          UO_DATA="${UO_DATA_DIR}"
           ok "UO data looks good: ${UO_DATA}"
           break
         fi
-        warn "Nothing usable in ${UO_DATA_DEST} yet:"
+        warn "Nothing usable in ${UO_DATA_DIR} yet:"
         warn "  ${UO_DATA_PROBLEM}"
       done
       ;;
   esac
 
-  link_uo_data "${UO_DATA}"
+  copy_uo_data "${UO_DATA}"
 }
 
 # ---------------------------------------------------------------------------
@@ -918,11 +936,16 @@ install_runtime_scripts() {
   cp "${src_dir}/reset-first-launch.sh" "${INSTALL_ROOT}/reset-first-launch.sh"
 
   # The launcher's update checker is optional - an install without it just
-  # never offers updates, which is the quiet way to fail.
-  if [[ -f "${src_dir}/update-check.sh" ]]; then
-    cp "${src_dir}/update-check.sh" "${INSTALL_ROOT}/update-check.sh"
+  # never offers updates, which is the quiet way to fail. Deploy the
+  # headless server variant (no GUI dialogs, no interactive terminal
+  # prompt, no self-driven download - it only ever prints a one-line
+  # notice and returns) under the same update-check.sh name start.sh
+  # looks for, so the desktop checker's own dialog/prompt logic never
+  # runs on a server install.
+  if [[ -f "${src_dir}/update-check-server.sh" ]]; then
+    cp "${src_dir}/update-check-server.sh" "${INSTALL_ROOT}/update-check.sh"
     chmod +x "${INSTALL_ROOT}/update-check.sh"
-    ok "Installed update-check.sh"
+    ok "Installed update-check.sh (headless variant)"
   fi
 
   write_version_stamp
@@ -1277,7 +1300,18 @@ install_playerbots() {
 }
 
 # ---------------------------------------------------------------------------
-main() {
+# Lifecycle: install
+# ---------------------------------------------------------------------------
+do_install() {
+  if [[ -d "${INSTALL_ROOT}" ]]; then
+    warn "${INSTALL_ROOT} already exists."
+    if [[ "${FORCE}" != "1" ]]; then
+      local answer
+      read -r -p "Continue installing into it anyway? Existing files may be reused or overwritten. [y/N]: " answer
+      [[ "${answer}" =~ ^[Yy] ]] || { say "Aborted. Nothing changed."; exit 0; }
+    fi
+  fi
+
   preflight
   install_deps
   fetch_modernuo
@@ -1295,6 +1329,124 @@ main() {
   arm_first_launch
   install_cheatsheet
   finish
+}
+
+# ---------------------------------------------------------------------------
+# Lifecycle: update
+#
+# Rebuilds ModernUO and PlayerBots and refreshes the launcher scripts, but
+# never touches uo-data/ (no resolve_uo_data / copy_uo_data call at all)
+# and defends Configuration/ and Saves/ around the rebuild: both are moved
+# aside before fetch/build and moved back afterward, so nothing a fresh
+# `dotnet publish` drops into Distribution/ can clobber a hand-edited
+# modernuo.json, existing accounts, or world state.
+# ---------------------------------------------------------------------------
+do_update() {
+  [[ -d "${INSTALL_ROOT}" ]] || die "No install found at ${INSTALL_ROOT}. Run: $(basename "$0") install"
+
+  banner "Updating UO Offline server"
+  preflight
+  install_deps
+
+  local backup_dir cfg_backed_up=0 saves_backed_up=0
+  backup_dir="$(mktemp -d "${INSTALL_ROOT}/.update-backup.XXXXXX")"
+
+  if [[ -d "${CFG_DIR}" ]]; then
+    mv "${CFG_DIR}" "${backup_dir}/Configuration"
+    cfg_backed_up=1
+  fi
+  if [[ -d "${DIST_DIR}/Saves" ]]; then
+    mv "${DIST_DIR}/Saves" "${backup_dir}/Saves"
+    saves_backed_up=1
+  fi
+
+  fetch_modernuo
+  bootstrap_dotnet
+  apply_engine_patches
+  install_playerbots
+
+  say "Forcing a rebuild against the updated source..."
+  rm -f "${DIST_DIR}/ModernUO.dll"
+  build_modernuo
+  fix_felucca_season
+
+  if [[ "${cfg_backed_up}" == "1" ]]; then
+    rm -rf "${CFG_DIR}"
+    mv "${backup_dir}/Configuration" "${CFG_DIR}"
+    ok "Restored Configuration/ (modernuo.json and friends untouched)."
+  fi
+  if [[ "${saves_backed_up}" == "1" ]]; then
+    rm -rf "${DIST_DIR}/Saves"
+    mv "${backup_dir}/Saves" "${DIST_DIR}/Saves"
+    ok "Restored Saves/ (world state and accounts untouched)."
+  fi
+  rmdir "${backup_dir}" 2>/dev/null || rm -rf "${backup_dir}"
+
+  fetch_spawn_map
+  install_runtime_scripts
+  install_cheatsheet
+
+  banner "Update complete"
+  ok "ModernUO and PlayerBots rebuilt. uo-data/, Configuration/, and Saves/ were left as they were."
+  say "Run ${INSTALL_ROOT}/start.sh to launch the updated server."
+}
+
+# ---------------------------------------------------------------------------
+# Lifecycle: uninstall
+# ---------------------------------------------------------------------------
+do_uninstall() {
+  banner "Uninstall"
+
+  if [[ ! -d "${INSTALL_ROOT}" ]]; then
+    say "Nothing to remove: ${INSTALL_ROOT} does not exist."
+    return
+  fi
+
+  if [[ "${FORCE}" != "1" ]]; then
+    local answer
+    read -r -p "Are you sure you want to remove ${INSTALL_ROOT}? [y/N]: " answer
+    [[ "${answer}" =~ ^[Yy] ]] || { say "Aborted. Nothing removed."; exit 0; }
+  fi
+
+  if [[ -x "${INSTALL_ROOT}/stop.sh" ]]; then
+    say "Stopping the server first..."
+    "${INSTALL_ROOT}/stop.sh" || true
+  fi
+
+  rm -rf "${INSTALL_ROOT}"
+  ok "Removed ${INSTALL_ROOT}."
+}
+
+# ---------------------------------------------------------------------------
+# Interactive action menu, used only when no install|update|uninstall
+# action was given on the command line.
+# ---------------------------------------------------------------------------
+resolve_action() {
+  [[ -z "${ACTION}" ]] || return 0
+
+  echo ""
+  echo "What would you like to do?"
+  echo "  1) install    - set up a new server in ./server-runtime"
+  echo "  2) update     - rebuild ModernUO/PlayerBots; keep saves/config/uo-data"
+  echo "  3) uninstall  - remove ./server-runtime"
+  echo ""
+  local choice
+  read -r -p "Choose [1-3] (or type install/update/uninstall): " choice
+  case "${choice}" in
+    1|install)   ACTION="install" ;;
+    2|update)    ACTION="update" ;;
+    3|uninstall) ACTION="uninstall" ;;
+    *) die "Unrecognized choice: ${choice}" ;;
+  esac
+}
+
+main() {
+  resolve_action
+  case "${ACTION}" in
+    install)   do_install ;;
+    update)    do_update ;;
+    uninstall) do_uninstall ;;
+  esac
 }
 
 main "$@"

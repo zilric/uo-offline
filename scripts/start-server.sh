@@ -13,10 +13,22 @@
 # =========================================================================
 set -uo pipefail
 
-# install-server.sh copies this script INTO the install root, so our own
-# directory is the install root - including when the operator chose a
-# custom location.
-INSTALL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+say()  { printf '\033[0;36m--> %s\033[0m\n' "$*"; }
+warn() { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# install-server.sh copies this script into the install root as start.sh,
+# but it's also runnable straight from the repo (./scripts/start-server.sh)
+# for testing. Either way the server root is locked to ./server-runtime
+# next to the repo root - never wherever this particular copy happens to
+# sit - so resolve it the same way install-server.sh does: one directory
+# above wherever this script's own directory is. Both scripts/ (the
+# checked-in copy) and server-runtime/ (the deployed copy) sit directly
+# under the repo root, so "one level up from here" lands on the repo root
+# in both cases, and REPO_ROOT/server-runtime always lands on the real
+# install.
+REPO_ROOT="$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)"
+INSTALL_ROOT="${REPO_ROOT}/server-runtime"
 DIST_DIR="${INSTALL_ROOT}/ModernUO/Distribution"
 PIDFILE="${INSTALL_ROOT}/modernuo.pid"
 LOGFILE="${INSTALL_ROOT}/modernuo.log"
@@ -26,34 +38,34 @@ OWNER_USER="admin"
 OWNER_PASS="admin"
 LISTEN_PORT=2593
 
-# .NET was installed per-user by the installer into ~/.dotnet/. Make dotnet
-# reachable here so we don't depend on the user's shell rc files having
-# been re-sourced since install.
-DOTNET_ROOT="${HOME}/.dotnet"
+# Find a usable dotnet: prefer one already on PATH (a system install, a
+# container base image, or install-server.sh's own PATH-first check at
+# bootstrap time), and only fall back to the per-user copy install-server.sh
+# bootstraps into ~/.dotnet when nothing is already resolvable.
+if command -v dotnet >/dev/null 2>&1; then
+  DOTNET_ROOT="$(dirname "$(command -v dotnet)")"
+else
+  DOTNET_ROOT="${HOME}/.dotnet"
+fi
 export DOTNET_ROOT
 export PATH="${DOTNET_ROOT}:${PATH}"
 
-say()  { printf '\033[0;36m--> %s\033[0m\n' "$*"; }
-warn() { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; }
-die()  { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
-
-[[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built. Run the installer first."
+[[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built at ${DIST_DIR}/ModernUO.dll. Run: ${REPO_ROOT}/install-server.sh install"
+command -v dotnet >/dev/null 2>&1 || die "dotnet not found (looked in \$PATH and ${DOTNET_ROOT}). Run the installer first."
 
 # ---------------------------------------------------------------------------
 # Ask GitHub whether there is a newer UO Offline before starting anything.
 #
-# The checker stays silent unless there is genuinely something new, and any
-# failure at all - no internet, GitHub down, rate limited - falls straight
-# through to launching the server. Exit code 10 means the operator chose to
-# update and the installer is now running, so we get out of the way.
+# The deployed update-check.sh is the headless server variant (see
+# scripts/update-check-server.sh) - no GUI dialog, no interactive terminal
+# prompt, no display-server dependency, and no self-driven update. It only
+# ever prints a one-line [NOTICE] to stderr if a newer version exists, or
+# says nothing at all (no internet, GitHub down, rate limited, already up
+# to date), and always returns so the server starts regardless. Updating
+# is a deliberate, separate step: run install-server.sh update.
 # ---------------------------------------------------------------------------
 UPDATER="${INSTALL_ROOT}/update-check.sh"
-if [[ -x "${UPDATER}" ]]; then
-  "${UPDATER}"
-  if [[ $? -eq 10 ]]; then
-    exit 0
-  fi
-fi
+[[ -x "${UPDATER}" ]] && "${UPDATER}"
 
 if [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
   die "Server already running (pid $(cat "${PIDFILE}")). Use stop.sh to stop it first."
