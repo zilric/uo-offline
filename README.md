@@ -1,10 +1,13 @@
 # UO Offline
 
-A single-player Ultima Online shard that runs entirely on your own machine. Works on **Windows, Linux, and the Steam Deck**. One installer sets everything up, and after it finishes you never need the internet again.
+A single(ish)-player Ultima Online shard that runs entirely on your own machine. Works on **Windows, Linux, and the Steam Deck**. One installer sets everything up, and after it finishes you never need the internet again.
 
 The point of it is the PlayerBots. The world is full of bots that fight, shop, bank, ride, travel the roads, crawl dungeons, join guilds, run war bands, gossip about things that actually happened, answer you when you talk to them, and log off for dinner. It plays like a busy 1999 shard instead of an empty map.
 
 Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https://github.com/ClassicUO/ClassicUO). T2A era, all on localhost.
+
+Currently this is just a fork of Klein187/uo-offline with a added server-install.sh script to install JUST the server part of this and set it up to allow LAN connections so you can play from a different
+computer, should also allow multiplayer.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>
