@@ -28,6 +28,22 @@
 # it behind a firewall/router that only allows your LAN to reach it, and
 # change the default admin password after your first login.
 #
+# Where it installs:
+#   ./install-server.sh --dir ./server        (or INSTALL_DIR=./server)
+#   ./install-server.sh --install-root /path   (legacy name, still works)
+#   Default: ./server-runtime under the current directory — no $HOME
+#   path is assumed, so this can be run straight out of a project
+#   checkout and everything it creates stays inside the workspace.
+#
+# Root/sudo is optional, not required:
+#   - If a compatible dotnet is already on $PATH, or every native package
+#     ModernUO needs is already present, the package-manager step is
+#     skipped automatically.
+#   - --skip-deps (or SKIP_DEPS=1) skips it unconditionally, assuming you
+#     already have everything.
+#   - --no-root (or NO_ROOT=1), or simply not having sudo, skips it and
+#     prints the exact packages to install by hand instead of blocking.
+#
 # Notes:
 #   - UO Classic game files are © Electronic Arts and are not distributed
 #     by this installer. You provide your own, from an existing install or
@@ -41,28 +57,47 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # Paths and URLs
 # ---------------------------------------------------------------------------
-# Where everything goes. Override it either way:
-#   ./install-server.sh --install-root /mnt/games/uo-server
-#   INSTALL_ROOT=/mnt/games/uo-server ./install-server.sh
-# Everything below hangs off this, so it has to be settled before they are.
+# Where everything goes. Override it any of these ways (highest priority
+# first): --dir (or --install-root), INSTALL_DIR env, INSTALL_ROOT env
+# (legacy name). Everything below hangs off this, so it has to be settled
+# before they are.
+_DIR_FLAG=""
 for _arg_i in $(seq 1 $#); do
-  if [[ "${!_arg_i}" == "--install-root" ]]; then
-    _next=$((_arg_i + 1))
-    INSTALL_ROOT="${!_next:-}"
-  elif [[ "${!_arg_i}" == --install-root=* ]]; then
-    INSTALL_ROOT="${!_arg_i#*=}"
-  elif [[ "${!_arg_i}" == "--no-map-editor" ]]; then
-    INSTALL_MAP_EDITOR=0
-  fi
+  case "${!_arg_i}" in
+    --install-root|--dir)
+      _next=$((_arg_i + 1))
+      _DIR_FLAG="${!_next:-}"
+      ;;
+    --install-root=*|--dir=*)
+      _DIR_FLAG="${!_arg_i#*=}"
+      ;;
+    --no-map-editor)
+      INSTALL_MAP_EDITOR=0
+      ;;
+    --skip-deps)
+      SKIP_DEPS=1
+      ;;
+    --no-root)
+      NO_ROOT=1
+      ;;
+  esac
 done
 
 # The map editor is a builder's tool - waypoints, spawns, a live view of the
 # bots - not something you need in order to play. On by default, off with
 # --no-map-editor or INSTALL_MAP_EDITOR=0.
 INSTALL_MAP_EDITOR="${INSTALL_MAP_EDITOR:-1}"
+# --skip-deps / --no-root: see "Root/sudo is optional" above. install_deps
+# reads these.
+SKIP_DEPS="${SKIP_DEPS:-0}"
+NO_ROOT="${NO_ROOT:-0}"
 unset _arg_i _next
 
-INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/uo-server}"
+# No more hardcoding a $HOME path: point this at your project checkout (or
+# leave it at the default) and everything - the ModernUO build, configs,
+# the UO data default, and the copied start.sh/stop.sh - resolves under it.
+INSTALL_ROOT="${_DIR_FLAG:-${INSTALL_DIR:-${INSTALL_ROOT:-$(pwd)/server-runtime}}}"
+unset _DIR_FLAG
 INSTALL_ROOT="${INSTALL_ROOT%/}"
 
 if [[ "${INSTALL_ROOT}" != /* ]]; then
@@ -105,8 +140,9 @@ LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0:2593}"
 SHARD_NAME="UO Offline"
 
 # Per-user .NET install location. Avoids needing root and survives SteamOS
-# read-only filesystem reverts.
-DOTNET_ROOT="${HOME}/.dotnet"
+# read-only filesystem reverts. Ignored if a compatible dotnet is already
+# on $PATH (see bootstrap_dotnet).
+DOTNET_ROOT="${DOTNET_ROOT:-${HOME}/.dotnet}"
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -127,7 +163,8 @@ preflight() {
   [[ "${EUID}" -ne 0 ]]         || die "Run as your normal user, not root. sudo will be invoked when needed."
 
   command -v curl   >/dev/null || die "curl is required."
-  command -v sudo   >/dev/null || warn "sudo not found — dependency install will fail if deps are missing."
+  command -v sudo   >/dev/null \
+    || warn "sudo not found — will fall back to printing the packages you need instead of installing them. See --skip-deps/--no-root."
 
   # The install root can be anywhere, so check it here rather than failing
   # several steps later with a confusing message.
@@ -146,16 +183,97 @@ preflight() {
 # downloaded game-client installer, which this installer doesn't do — see
 # resolve_uo_data). p7zip stays; the optional T2A map-art swap uses 7z on
 # an NSIS archive.
+#
+# Root/sudo is optional. install_deps tries, in order:
+#   1. Is a compatible dotnet already on $PATH? If so there's nothing to
+#      install at all - skip the package manager entirely.
+#   2. --skip-deps / SKIP_DEPS=1: trust the caller, skip unconditionally.
+#   3. Are git, curl and the native libs already present? Skip.
+#   4. --no-root / NO_ROOT=1, or no sudo and not root: can't install
+#      packages here. Print exactly what's needed and move on instead of
+#      blocking on a sudo prompt that will never come.
+#   5. Otherwise, install via the distro's package manager as before.
 # ---------------------------------------------------------------------------
+APT_PKGS=(libicu-dev libdeflate-dev zstd libargon2-dev liburing-dev libgdiplus p7zip-full build-essential git)
+PACMAN_PKGS=(icu libdeflate zstd argon2 liburing libgdiplus p7zip base-devel git)
+DNF_PKGS=(libicu libdeflate-devel zstd libargon2-devel liburing-devel libgdiplus p7zip @development-tools git)
+
+# Version of dotnet already on $PATH, if it satisfies major version 8+.
+# Printed on stdout, empty (and non-zero exit) otherwise.
+dotnet_on_path_version() {
+  command -v dotnet >/dev/null 2>&1 || return 1
+  local ver="" major=""
+  ver="$(dotnet --version 2>/dev/null | head -n1)"
+  major="${ver%%.*}"
+  [[ "${major}" =~ ^[0-9]+$ ]] || return 1
+  [[ "${major}" -ge 8 ]] || return 1
+  printf '%s' "${ver}"
+}
+
+# Heuristic: git, curl, a usable dotnet, and (where ldconfig exists) a
+# couple of the native libs ModernUO links against. Not exhaustive - good
+# enough to tell "this box already has a working toolchain" from "needs
+# the package manager step".
+deps_already_satisfied() {
+  command -v git  >/dev/null 2>&1 || return 1
+  command -v curl >/dev/null 2>&1 || return 1
+  dotnet_on_path_version >/dev/null || return 1
+  if command -v ldconfig >/dev/null 2>&1; then
+    ldconfig -p 2>/dev/null | grep -q 'libicuuc'   || return 1
+    ldconfig -p 2>/dev/null | grep -q 'libdeflate' || return 1
+  fi
+  return 0
+}
+
+print_manual_dep_instructions() {
+  warn "ModernUO needs these native packages to build and run:"
+  if command -v apt-get >/dev/null 2>&1; then
+    warn "    sudo apt-get install -y ${APT_PKGS[*]}"
+  elif command -v pacman >/dev/null 2>&1; then
+    warn "    sudo pacman -S --needed ${PACMAN_PKGS[*]}"
+  elif command -v dnf >/dev/null 2>&1; then
+    warn "    sudo dnf install -y ${DNF_PKGS[*]}"
+  else
+    warn "    git, libicu, libdeflate, zstd, libargon2, liburing, libgdiplus, p7zip, and a C build toolchain"
+  fi
+  warn "Install them yourself (or re-run with sudo available) and re-run this installer."
+}
+
 install_deps() {
   banner "Installing native dependencies"
+
+  local existing_dotnet=""
+  if existing_dotnet="$(dotnet_on_path_version)"; then
+    ok "Found .NET ${existing_dotnet} already on PATH ($(command -v dotnet)) — skipping the package manager step entirely."
+    return
+  fi
+
+  if [[ "${SKIP_DEPS}" == "1" ]]; then
+    say "Skipping dependency installation (--skip-deps). Assuming required tools are already present."
+    return
+  fi
+
+  if deps_already_satisfied; then
+    ok "Required tooling already present (git, curl, dotnet, native libs). Skipping the package manager step."
+    return
+  fi
+
+  if [[ "${NO_ROOT}" == "1" ]]; then
+    say "Skipping automatic package installation (--no-root)."
+    print_manual_dep_instructions
+    return
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    warn "sudo is not available and some required packages are missing."
+    print_manual_dep_instructions
+    return
+  fi
 
   if command -v apt-get >/dev/null; then
     say "Debian-family distro detected. Using apt."
     sudo apt-get update -y
-    sudo apt-get install -y \
-      libicu-dev libdeflate-dev zstd libargon2-dev liburing-dev \
-      libgdiplus p7zip-full build-essential git
+    sudo apt-get install -y "${APT_PKGS[@]}"
   elif command -v pacman >/dev/null; then
     say "Arch-family distro detected. Using pacman."
     if [[ -f /etc/os-release ]] && grep -qi steamos /etc/os-release; then
@@ -165,18 +283,17 @@ install_deps() {
       warn "Press Ctrl-C now to abort, or any key to continue."
       read -r -n 1 -s
     fi
-    sudo pacman -S --needed --noconfirm \
-      icu libdeflate zstd argon2 liburing \
-      libgdiplus p7zip base-devel git
+    sudo pacman -S --needed --noconfirm "${PACMAN_PKGS[@]}"
   elif command -v dnf >/dev/null; then
     say "Fedora-family distro detected. Using dnf."
-    sudo dnf install -y libicu libdeflate-devel zstd libargon2-devel \
-      liburing-devel libgdiplus p7zip @development-tools git
+    sudo dnf install -y "${DNF_PKGS[@]}"
   else
-    die "Unsupported package manager. Install manually: git, libicu, libdeflate, zstd, libargon2, liburing, p7zip."
+    warn "Unsupported package manager."
+    print_manual_dep_instructions
+    return
   fi
 
-  command -v git >/dev/null || die "git is still missing after the dependency step. Install git and re-run."
+  command -v git >/dev/null || warn "git is still missing after the dependency step. Steps that need it will fail until it's installed."
 
   ok "Dependencies installed."
 }
@@ -228,6 +345,17 @@ bootstrap_dotnet() {
       channel="$(echo "${sdk_ver}" | awk -F. '{print $1"."$2}')"
       say "ModernUO wants SDK ${sdk_ver}; using channel ${channel}."
     fi
+  fi
+
+  # Already on $PATH (system package, another install, a container base
+  # image) and it has the channel ModernUO wants? Use it as-is - no sudo,
+  # no download, no per-user copy.
+  if command -v dotnet >/dev/null 2>&1 \
+     && dotnet --list-sdks 2>/dev/null | grep -qE "^${channel}\."; then
+    ok "Found compatible SDK already on PATH: $(command -v dotnet)"
+    DOTNET_ROOT="$(dirname "$(command -v dotnet)")"
+    export DOTNET_ROOT
+    return
   fi
 
   if [[ -x "${DOTNET_ROOT}/dotnet" ]] \
@@ -408,6 +536,39 @@ autodetect_uo_data() {
   return 1
 }
 
+# link_uo_data — normalize wherever the real UO data lives into a symlink
+# at ${INSTALL_ROOT}/uo-data, and point UO_DATA at that symlink.
+#
+# The data directory the operator gives us can be anywhere on disk (an
+# existing client install, a Steam compatdata prefix, /mnt/uo). Referencing
+# it from outside the install root works fine for the server, but leaves
+# nothing to see from an editor opened on INSTALL_ROOT. A symlink keeps
+# config generation pointed at one real location while making the data
+# browsable from inside the workspace.
+# ---------------------------------------------------------------------------
+link_uo_data() {
+  local real="$1" link="${INSTALL_ROOT}/uo-data"
+
+  # Already exactly the target location (the default "no data yet" path
+  # writes straight there) - nothing to link.
+  if [[ "$(cd "${real}" 2>/dev/null && pwd)" == "$(cd "${INSTALL_ROOT}" && pwd)/uo-data" ]]; then
+    UO_DATA="${real}"
+    return
+  fi
+
+  if [[ -L "${link}" ]]; then
+    rm -f "${link}"
+  elif [[ -e "${link}" ]]; then
+    warn "${link} exists and isn't a symlink; leaving UO data referenced at ${real} directly."
+    UO_DATA="${real}"
+    return
+  fi
+
+  ln -s "${real}" "${link}"
+  ok "Linked UO data into the workspace: ${link} -> ${real}"
+  UO_DATA="${link}"
+}
+
 # ---------------------------------------------------------------------------
 # resolve_uo_data — interactive UO data-file routine.
 #
@@ -419,12 +580,17 @@ autodetect_uo_data() {
 #   2. If nothing turns up, ask whether the operator already has a client
 #      or data files somewhere, and either take a path from them or point
 #      them at https://uo.com/download and wait.
+#
+# Either way, UO_DATA ends up normalized to a symlink inside INSTALL_ROOT
+# (see link_uo_data) so it's visible from an editor opened on the install
+# directory even when the real files live elsewhere.
 # ---------------------------------------------------------------------------
 resolve_uo_data() {
   banner "Locating UO game data"
 
   if autodetect_uo_data; then
     ok "Found existing UO data: ${UO_DATA}"
+    link_uo_data "${UO_DATA}"
     return
   fi
 
@@ -483,6 +649,8 @@ resolve_uo_data() {
       done
       ;;
   esac
+
+  link_uo_data "${UO_DATA}"
 }
 
 # ---------------------------------------------------------------------------
