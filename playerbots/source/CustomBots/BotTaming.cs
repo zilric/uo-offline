@@ -413,11 +413,10 @@ namespace Server.CustomBots
                 // directional stepping stalled on every tree line — four
                 // stalks, four timeouts, zero tames on the first soak.
                 _follower ??= new PathFollower(bot, quarry);
-                bool run = dist > 10;
-                _follower.Follow(run, TameRange);
+                _follower.Follow(TameRange);
                 if (!bot.InRange(quarry.Location, TameRange))
                 {
-                    _follower.Follow(run, TameRange);
+                    _follower.Follow(TameRange);
                 }
                 return;
             }

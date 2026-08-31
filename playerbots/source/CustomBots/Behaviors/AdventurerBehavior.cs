@@ -2281,7 +2281,7 @@ namespace Server.CustomBots
                 return;
             }
 
-            bool arrived = _follower.Follow(_running, ArrivalRange);
+            bool arrived = _follower.Follow(ArrivalRange);
             if (arrived)
             {
                 // Reached current goal. KEEP _goal set — the decision tick's
