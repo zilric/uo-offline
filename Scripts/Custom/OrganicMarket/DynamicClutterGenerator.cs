@@ -15,7 +15,9 @@
 // dedicated content class exists for it (a display pedestal, a bow rack).
 // =========================================================================
 
+using System;
 using System.Collections.Generic;
+using Server.Items;
 using Server.Multis;
 
 namespace Server.Engines.OrganicMarket;
@@ -42,32 +44,68 @@ public static class DynamicClutterGenerator
         [MarketArchetype.TailorFletcher] = new[] { 0x1015, 0x1062, 0x1508 }
     };
 
+    // SP-024: "someone actually lives here" clutter for the ~90% ambient
+    // filler houses - ordinary movable furniture classes rather than raw
+    // tile IDs, chosen specifically to sidestep two traps: bed-shaped
+    // items in this engine are almost all multi-tile IAddon deeds (wrong
+    // shape for a single MoveToWorld+LockDown drop), and WallTorch
+    // hardcodes Movable=false in its own constructor (LockDown requires
+    // Movable), so neither fits this system's placement model. Bedroll
+    // reads as a sleeping spot without being an addon; the rest are
+    // ordinary single-tile furniture/containers.
+    private static readonly Func<Item>[] ResidentialFurniture =
+    {
+        () => new WoodenChair(),
+        () => new PlainLowTable(),
+        () => new Nightstand(),
+        () => new ClosedBarrel(),
+        () => new Bedroll()
+    };
+
     // Furnishes `house` with `archetype`'s clutter set, locking each piece
     // down under `authority`. Safe to call on any house/map state; skips
     // silently (never throws, never blocks the placement pipeline) if a
     // piece can't find a wall slot or fails to lock down.
     public static void Furnish(BaseHouse house, MarketArchetype archetype, Mobile authority)
     {
-        if (house?.Map is not { } map || map == Map.Internal || authority == null)
+        if (!ClutterItemIds.TryGetValue(archetype, out var itemIds) || itemIds.Length == 0)
         {
             return;
         }
 
-        if (!ClutterItemIds.TryGetValue(archetype, out var itemIds) || itemIds.Length == 0)
+        var factories = new Func<Item>[itemIds.Length];
+        for (var i = 0; i < itemIds.Length; i++)
+        {
+            var id = itemIds[i]; // capture by value, not by the loop variable
+            factories[i] = () => new Item(id);
+        }
+
+        FurnishItems(house, authority, factories);
+    }
+
+    // SP-024: same placement/lockdown machinery as Furnish, just with
+    // residential furniture instead of an archetype's merchant set - see
+    // OrganicMarketSpawner.PlaceHouse's ambient-filler branch.
+    public static void FurnishResidential(BaseHouse house, Mobile authority) =>
+        FurnishItems(house, authority, ResidentialFurniture);
+
+    private static void FurnishItems(BaseHouse house, Mobile authority, Func<Item>[] factories)
+    {
+        if (house?.Map is not { } map || map == Map.Internal || authority == null)
         {
             return;
         }
 
         var placed = new List<Point3D>();
 
-        foreach (var itemId in itemIds)
+        foreach (var factory in factories)
         {
             if (!TryFindWallSlot(house, map, placed, out var loc))
             {
                 continue; // floor plan ran out of clear wall tiles - skip this piece rather than crowd another
             }
 
-            var clutter = new Item(itemId);
+            var clutter = factory();
             clutter.MoveToWorld(loc, map);
 
             if (house.LockDown(authority, clutter, false))

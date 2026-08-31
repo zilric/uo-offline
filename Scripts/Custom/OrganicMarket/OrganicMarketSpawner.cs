@@ -27,10 +27,18 @@ public static class OrganicMarketSpawner
 
     public static string StyleName(MarketHouseStyle style) => style switch
     {
-        MarketHouseStyle.SmallShop           => "Small Shop",
-        MarketHouseStyle.TwoStoryWoodPlaster => "Two-Story Wood & Plaster",
-        MarketHouseStyle.LargePatio          => "Large Patio House",
-        _                                     => style.ToString()
+        MarketHouseStyle.SmallShop            => "Small Shop",
+        MarketHouseStyle.TwoStoryWoodPlaster  => "Two-Story Wood & Plaster",
+        MarketHouseStyle.LargePatio           => "Large Patio House",
+        MarketHouseStyle.SmallPlasterHouse    => "Small Brick & Plaster House",
+        MarketHouseStyle.SmallStoneHouse      => "Small Fieldstone House",
+        MarketHouseStyle.SmallWoodHouse       => "Small Wood House",
+        MarketHouseStyle.WoodAndPlasterHouse  => "Wood & Plaster House",
+        MarketHouseStyle.StoneAndPlasterHouse => "Stone & Plaster House",
+        MarketHouseStyle.SandStonePatio       => "Sandstone Patio House",
+        MarketHouseStyle.LogCabin             => "Log Cabin",
+        MarketHouseStyle.SmallTower           => "Small Tower",
+        _                                      => style.ToString()
     };
 
     public static string ArchetypeName(MarketArchetype archetype) => archetype switch
@@ -48,18 +56,39 @@ public static class OrganicMarketSpawner
     // with where the house actually lands.
     public static int MultiId(MarketHouseStyle style) => style switch
     {
-        MarketHouseStyle.SmallShop           => 0xA0,
-        MarketHouseStyle.TwoStoryWoodPlaster => 0x76,
-        MarketHouseStyle.LargePatio          => 0x8C,
-        _                                     => 0xA0
+        MarketHouseStyle.SmallShop            => 0xA0,
+        MarketHouseStyle.TwoStoryWoodPlaster  => 0x76,
+        MarketHouseStyle.LargePatio           => 0x8C,
+        // SmallOldHouse variants (Multis/Houses/Houses.cs) - one class,
+        // multi ID picks the visual (see Multis/Deeds.cs for the same
+        // ID->name mapping stock deeds use).
+        MarketHouseStyle.SmallPlasterHouse    => 0x68, // SmallBrickHouseDeed
+        MarketHouseStyle.SmallStoneHouse      => 0x66, // FieldStoneHouseDeed
+        MarketHouseStyle.SmallWoodHouse       => 0x6A, // WoodHouseDeed
+        MarketHouseStyle.WoodAndPlasterHouse  => 0x6C, // WoodPlasterHouseDeed
+        MarketHouseStyle.StoneAndPlasterHouse => 0x64, // StonePlasterHouseDeed
+        MarketHouseStyle.SandStonePatio       => 0x9C,
+        MarketHouseStyle.LogCabin             => 0x9A,
+        MarketHouseStyle.SmallTower           => 0x98,
+        _                                      => 0xA0
     };
 
     public static Point3D PlacementOffset(MarketHouseStyle style) => style switch
     {
-        MarketHouseStyle.SmallShop           => new Point3D(-1, 4, 0),
-        MarketHouseStyle.TwoStoryWoodPlaster => new Point3D(-3, 7, 0),
-        MarketHouseStyle.LargePatio          => new Point3D(-4, 7, 0),
-        _                                     => Point3D.Zero
+        MarketHouseStyle.SmallShop            => new Point3D(-1, 4, 0),
+        MarketHouseStyle.TwoStoryWoodPlaster  => new Point3D(-3, 7, 0),
+        MarketHouseStyle.LargePatio           => new Point3D(-4, 7, 0),
+        // Every SmallOldHouse variant shares the same deed offset
+        // (Multis/Deeds.cs) regardless of which of the 5 multi IDs above.
+        MarketHouseStyle.SmallPlasterHouse    => new Point3D(0, 4, 0),
+        MarketHouseStyle.SmallStoneHouse      => new Point3D(0, 4, 0),
+        MarketHouseStyle.SmallWoodHouse       => new Point3D(0, 4, 0),
+        MarketHouseStyle.WoodAndPlasterHouse  => new Point3D(0, 4, 0),
+        MarketHouseStyle.StoneAndPlasterHouse => new Point3D(0, 4, 0),
+        MarketHouseStyle.SandStonePatio       => new Point3D(-1, 4, 0),
+        MarketHouseStyle.LogCabin             => new Point3D(1, 6, 0),
+        MarketHouseStyle.SmallTower           => new Point3D(3, 4, 0),
+        _                                      => Point3D.Zero
     };
 
     // Builds and places everything at `center` (already validated by
@@ -69,6 +98,16 @@ public static class OrganicMarketSpawner
     // shifted to the house's ban location, same as a real deed placement.
     public static int PlaceTestHouse(
         Map map, Point3D center, MarketHouseStyle style, MarketArchetype archetype, List<IEntity> toMove
+    ) => PlaceHouse(map, center, style, archetype, toMove);
+
+    // SP-024: the ~90% "ambient filler" side of world inhabitation - same
+    // pipeline, same registry, same teardown, just archetype: null steers
+    // PlaceHouse to the residential branch instead of the vendor one below.
+    public static int PlaceFillerHouse(Map map, Point3D center, MarketHouseStyle style, List<IEntity> toMove)
+        => PlaceHouse(map, center, style, null, toMove);
+
+    private static int PlaceHouse(
+        Map map, Point3D center, MarketHouseStyle style, MarketArchetype? archetype, List<IEntity> toMove
     )
     {
         var authority = MerchantGuildAuthority.Instance;
@@ -84,17 +123,7 @@ public static class OrganicMarketSpawner
         }
 
         house.RestrictDecay = true;
-        house.Public = true;
         house.MoveToWorld(center, map);
-
-        // house.Public only governs who may walk the interior region - the
-        // doors themselves are built already locked, keyed to `authority`
-        // (BaseHouse's AddEastDoor/AddSouthDoor helpers set Locked=true +
-        // KeyValue at construction, same as a real player's house), and
-        // that key never leaves authority's own bank box. Left alone, a
-        // real player can never open a single one of these doors. Public
-        // storefronts don't lock their own front door.
-        UnlockDoors(house);
 
         if (toMove != null)
         {
@@ -112,14 +141,39 @@ public static class OrganicMarketSpawner
             }
         }
 
-        // Clutter goes down BEFORE the vendor spot is chosen: InteriorTileFinder
-        // reads house.LockDowns to steer clear of it, which only works if
-        // it's already locked down by the time it scans.
-        DynamicClutterGenerator.Furnish(house, archetype, authority);
+        if (archetype is { } a)
+        {
+            // house.Public only governs who may walk the interior region -
+            // the doors themselves are built already locked, keyed to
+            // `authority` (BaseHouse's AddEastDoor/AddSouthDoor helpers set
+            // Locked=true + KeyValue at construction, same as a real
+            // player's house), and that key never leaves authority's own
+            // bank box. Left alone, a real player can never open a single
+            // one of these doors. Public storefronts don't lock their own
+            // front door.
+            house.Public = true;
+            UnlockDoors(house);
 
-        var vendor = SpawnVendor(authority, house, archetype);
+            // Clutter goes down BEFORE the vendor spot is chosen:
+            // InteriorTileFinder reads house.LockDowns to steer clear of
+            // it, which only works if it's already locked down by the
+            // time it scans.
+            DynamicClutterGenerator.Furnish(house, a, authority);
 
-        authority.Register(house, ArchetypeName(archetype), vendor);
+            var vendor = SpawnVendor(authority, house, a);
+            authority.Register(house, ArchetypeName(a), vendor);
+        }
+        else
+        {
+            // Ambient filler: private residence, doors stay locked exactly
+            // as BaseHouse built them (that's the classic UO "someone
+            // lives here" read), residential clutter instead of a
+            // merchant's craft station, and no PlayerVendor at all.
+            house.Public = false;
+            DynamicClutterGenerator.FurnishResidential(house, authority);
+            authority.Register(house, "Ambient Residence", null);
+        }
+
         return authority.Count - 1;
     }
 
@@ -142,12 +196,63 @@ public static class OrganicMarketSpawner
         }
     }
 
+    // Runs HousePlacement.Check the same way a real house deed would -
+    // against a non-staff Mobile so an AccessLevel.GameMaster+ actor (or,
+    // for WorldHouseSeeder, no actor at all) doesn't silently bypass every
+    // rule the check exists to enforce (overlapping structures, bad
+    // terrain, blocking statics). MerchantGuildAuthority is temporarily
+    // relocated to `center` for exactly the duration of the check, then
+    // restored - it never actually needs to be there, HousePlacement.Check
+    // just needs a Mobile that isn't staff-privileged to test against.
+    //
+    // Callers still own their own Region.AllowHousing() pre-check (guard
+    // zones, roads, "no housing" regions) - that one needs the caller's
+    // own point (a clicked reticle position for the interactive target,
+    // a search candidate for the seeder) and, for the interactive path,
+    // its own region-specific failure messaging, so it isn't folded in
+    // here.
+    public static HousePlacementResult CheckPlacement(
+        Map map, Point3D center, MarketHouseStyle style, out List<IEntity> toMove
+    )
+    {
+        toMove = null;
+
+        var authority = MerchantGuildAuthority.Instance;
+        if (authority == null)
+        {
+            return HousePlacementResult.BadRegion;
+        }
+
+        var multiId = MultiId(style);
+        var savedMap = authority.Map;
+        var savedLoc = authority.Location;
+        try
+        {
+            authority.Map = map;
+            authority.Location = center;
+            return HousePlacement.Check(authority, multiId, center, out toMove);
+        }
+        finally
+        {
+            authority.Location = savedLoc;
+            authority.Map = savedMap;
+        }
+    }
+
     private static BaseHouse BuildHouse(MarketHouseStyle style, Mobile owner) => style switch
     {
-        MarketHouseStyle.SmallShop           => new SmallShop(owner, 0xA0),
-        MarketHouseStyle.TwoStoryWoodPlaster => new TwoStoryHouse(owner, 0x76),
-        MarketHouseStyle.LargePatio          => new LargePatioHouse(owner),
-        _                                     => null
+        MarketHouseStyle.SmallShop            => new SmallShop(owner, 0xA0),
+        MarketHouseStyle.TwoStoryWoodPlaster  => new TwoStoryHouse(owner, 0x76),
+        MarketHouseStyle.LargePatio           => new LargePatioHouse(owner),
+        MarketHouseStyle.SmallPlasterHouse    => new SmallOldHouse(owner, 0x68),
+        MarketHouseStyle.SmallStoneHouse      => new SmallOldHouse(owner, 0x66),
+        MarketHouseStyle.SmallWoodHouse       => new SmallOldHouse(owner, 0x6A),
+        MarketHouseStyle.WoodAndPlasterHouse  => new SmallOldHouse(owner, 0x6C),
+        MarketHouseStyle.StoneAndPlasterHouse => new SmallOldHouse(owner, 0x64),
+        MarketHouseStyle.SandStonePatio       => new SandStonePatio(owner),
+        MarketHouseStyle.LogCabin             => new LogCabin(owner),
+        MarketHouseStyle.SmallTower           => new SmallTower(owner),
+        _                                      => null
     };
 
     // A real commissioned PlayerVendor, not a stock town NPC: it links to

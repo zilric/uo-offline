@@ -15,7 +15,6 @@
 // still go to the real GM.
 // =========================================================================
 
-using System.Collections.Generic;
 using Server.Multis;
 using Server.Regions;
 using Server.Targeting;
@@ -75,24 +74,8 @@ public class MarketHousePlacementTarget : MultiTarget
 
         var offset = OrganicMarketSpawner.PlacementOffset(_style);
         var center = new Point3D(p.X - offset.X, p.Y - offset.Y, p.Z - offset.Z);
-        var multiId = OrganicMarketSpawner.MultiId(_style);
 
-        var savedMap = authority.Map;
-        var savedLoc = authority.Location;
-        List<IEntity> toMove;
-        HousePlacementResult res;
-        try
-        {
-            authority.Map = map;
-            authority.Location = center;
-            res = HousePlacement.Check(authority, multiId, center, out toMove);
-        }
-        finally
-        {
-            authority.Location = savedLoc;
-            authority.Map = savedMap;
-        }
-
+        var res = OrganicMarketSpawner.CheckPlacement(map, center, _style, out var toMove);
         if (res != HousePlacementResult.Valid)
         {
             SendPlacementFailure(from, res);

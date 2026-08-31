@@ -26,6 +26,8 @@ public class OrganicMarketAdminGump : DynamicGump
     private const int ButtonDirectory = 2;
     private const int ButtonGlobalRestock = 3;
     private const int ButtonWipeAll = 4;
+    private const int ButtonSeedWorld = 5;
+    private const int ButtonSeedInhabitation = 6;
 
     private static readonly MarketHouseStyle[] Styles =
     {
@@ -65,7 +67,7 @@ public class OrganicMarketAdminGump : DynamicGump
         // bit further than that to actually land clipping-free rather than
         // stop at a number that still clips by a few pixels.
         const int width = 380;
-        const int height = 530;
+        const int height = 610;
         const int radioRowHeight = 24;
 
         builder.AddPage();
@@ -110,12 +112,20 @@ public class OrganicMarketAdminGump : DynamicGump
         builder.AddButton(24, directoryY, 4005, 4007, ButtonDirectory);
         builder.AddLabel(60, directoryY, 0x480, "Open Market House Directory");
 
-        var restockY = directoryY + 40;
+        var inhabitationY = directoryY + 34;
+        builder.AddButton(24, inhabitationY, 4005, 4007, ButtonSeedInhabitation);
+        builder.AddLabel(60, inhabitationY, 0x59, "Seed World Inhabitation (Filler Houses)");
+
+        var restockY = inhabitationY + 40;
         builder.AddHtml(20, restockY - 10, width - 40, 2, "<basefont color=#555555>________________________________</basefont>");
         builder.AddButton(24, restockY + 16, 4005, 4007, ButtonGlobalRestock);
         builder.AddLabel(60, restockY + 16, 0x44, "Force Global Restock (all vendors)");
 
-        var wipeY = restockY + 56;
+        var seedY = restockY + 56;
+        builder.AddButton(24, seedY, 4005, 4007, ButtonSeedWorld);
+        builder.AddLabel(60, seedY, 0x59, "Seed World Crossroads");
+
+        var wipeY = seedY + 40;
         builder.AddButton(24, wipeY, 4017, 4019, ButtonWipeAll);
         builder.AddLabel(60, wipeY, 0x25, "Wipe All Market Houses");
     }
@@ -154,6 +164,23 @@ public class OrganicMarketAdminGump : DynamicGump
 
             case ButtonWipeAll:
                 OrganicMarketWipeConfirmGump.DisplayTo(from);
+                break;
+
+            case ButtonSeedWorld:
+                // Fire-and-forget: places one node every ~75ms via Timer so
+                // packet output spreads across seconds instead of bursting
+                // all at once (see WorldHouseSeeder's file header) - the
+                // "seeded X/Total" summary arrives as its own message once
+                // the last node's tick runs, not synchronously here.
+                from.SendMessage("OrganicMarket: seeding trade corridor houses...");
+                WorldHouseSeeder.SeedAll(from);
+                DisplayTo(from);
+                break;
+
+            case ButtonSeedInhabitation:
+                from.SendMessage("OrganicMarket: seeding world inhabitation across Britannia...");
+                WorldHouseSeeder.SeedInhabitation(from);
+                DisplayTo(from);
                 break;
         }
     }

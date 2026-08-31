@@ -25,7 +25,19 @@ public enum MarketHouseStyle
 {
     SmallShop,
     TwoStoryWoodPlaster,
-    LargePatio
+    LargePatio,
+
+    // SP-024: added for visual variety across dozens of ambient/vendor
+    // placements - see OrganicMarketSpawner.BuildHouse for the real
+    // ModernUO class + multi ID each maps to.
+    SmallPlasterHouse,
+    SmallStoneHouse,
+    SmallWoodHouse,
+    WoodAndPlasterHouse,
+    StoneAndPlasterHouse,
+    SandStonePatio,
+    LogCabin,
+    SmallTower
 }
 
 public enum MarketArchetype

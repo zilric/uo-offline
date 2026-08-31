@@ -844,7 +844,8 @@ write_modernuo_json() {
     "serverListing.name": "${RESOLVED_SHARD_NAME}",
     "serverListing.serverName": "${RESOLVED_SHARD_NAME}",
     "accountHandler.enableAutoAccountCreation": "True",
-    "pathfinding.prebakeMaps": "True"
+    "pathfinding.prebakeMaps": "True",
+    "network.sendBufferSize": "2097152"
   }
 }
 EOF
@@ -1002,6 +1003,38 @@ ensure_modernuo_config() {
 
   if [[ "${wrote_any}" == "0" ]]; then
     say "Configuration/ already has modernuo.json, expansion.json, and FeatureFlags/flags.json. Leaving them as they are."
+  fi
+}
+
+# A narrow, deliberate exception to ensure_modernuo_config's "existing file,
+# however incomplete, is left untouched" rule above: this one key's engine
+# default (262144 bytes / 256KB, DefaultSendBufferSize in
+# NetState.Network.cs) is too small for OrganicMarket's world-seeding tools
+# (Scripts/Custom/OrganicMarket/WorldHouseSeeder.cs), which can burst enough
+# multi/item/mobile update packets to a nearby GM to exhaust it and
+# disconnect the client ("send buffer exhausted" in the server log). A
+# config file that predates this key (the server's own
+# ServerConfiguration.GetOrUpdateSetting writes the 256KB default back into
+# modernuo.json the first time anything reads the setting, same as any
+# other setting) gets it raised in place; a value already at or above the
+# new floor - an operator's own deliberate setting - is left alone.
+ensure_send_buffer_size() {
+  local target=2097152 # 2 MB, a power of two (required - see NetState.Network.cs)
+  local cfg="${CFG_DIR}/modernuo.json"
+  [[ -f "${cfg}" ]] || return 0
+
+  local current
+  current="$(grep -oE '"network\.sendBufferSize"[[:space:]]*:[[:space:]]*"[0-9]+"' "${cfg}" 2>/dev/null \
+    | grep -oE '[0-9]+' | head -n1 || true)"
+
+  if [[ -z "${current}" ]]; then
+    sed -i "s/\"settings\": {/\"settings\": {\n    \"network.sendBufferSize\": \"${target}\",/" "${cfg}"
+    ok "Set network.sendBufferSize to ${target} (2 MB) in modernuo.json"
+  elif [[ "${current}" -lt "${target}" ]]; then
+    sed -i -E "s/(\"network\.sendBufferSize\"[[:space:]]*:[[:space:]]*\")[0-9]+(\")/\1${target}\2/" "${cfg}"
+    ok "Raised network.sendBufferSize from ${current} to ${target} (2 MB) in modernuo.json"
+  else
+    say "network.sendBufferSize already ${current} (>= ${target}); leaving as-is."
   fi
 }
 
@@ -1457,6 +1490,7 @@ do_install() {
   swap_t2a_map
   fetch_spawn_map
   write_modernuo_config
+  ensure_send_buffer_size
   install_runtime_scripts
   arm_first_launch
   install_cheatsheet
@@ -1520,6 +1554,7 @@ do_update() {
   # a safety net against a config directory that never had all three to
   # begin with, not a way around the "never clobber hand edits" promise.
   ensure_modernuo_config
+  ensure_send_buffer_size
 
   fetch_spawn_map
   install_runtime_scripts
