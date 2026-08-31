@@ -139,13 +139,23 @@ public partial class MerchantGuildAuthority : Mobile
     // the precise filtering below.
     private const int FootprintSweepRange = 20;
 
-    // Deletes the house, every item locked down in it OR merely sitting
-    // in its footprint, its door keys, and its vendor (which — being a
-    // Mobile.Delete() — cascade-deletes its own worn items and
-    // VendorBackpack contents on its own). Removes the slot from every
-    // parallel list. Never throws — a half-torn-down entry (house
-    // already gone, vendor already gone) is still cleanly dropped from
-    // the registry.
+    // Deletes the vendor, the house, every item locked down in it OR
+    // merely sitting in its footprint, and its door keys. Removes the slot
+    // from every parallel list. Never throws — a half-torn-down entry
+    // (house already gone, vendor already gone) is still cleanly dropped
+    // from the registry.
+    //
+    // Vendor goes FIRST, house second — deliberately. BaseHouse.OnAfterDelete()
+    // calls KillVendors(), which calls PlayerVendor.Destroy(true) on
+    // anything still sitting in house.PlayerVendors, and Destroy(true)
+    // drops a loose backpack with whatever's left in it onto the ground
+    // before deleting the vendor — that's the real source of "deleting a
+    // house drops the vendor's backpack," not anything Mobile.Delete()
+    // itself does. Clearing and deleting the vendor here first means its
+    // own OnAfterDelete already sets House = null, which — via the House
+    // field's fieldChanged hook, PlayerVendor.OnHouseChanged — removes it
+    // from house.PlayerVendors. By the time house.Delete() runs and
+    // KillVendors() looks, there's nothing left in the list to evict.
     public bool DeleteAt(int i)
     {
         if (i < 0 || i >= _houses.Count)
@@ -155,6 +165,20 @@ public partial class MerchantGuildAuthority : Mobile
 
         var house = _houses[i];
         var vendor = _vendors[i];
+
+        if (vendor?.Deleted == false)
+        {
+            // Belt-and-suspenders on top of the fieldChanged hook above -
+            // guarantees KillVendors() (below, inside house.Delete()) has
+            // nothing to find regardless of deletion order elsewhere.
+            if (vendor is PlayerVendor && house != null)
+            {
+                house.PlayerVendors.Remove((PlayerVendor)vendor);
+            }
+
+            ClearVendorInventory(vendor);
+            vendor.Delete();
+        }
 
         if (house?.Deleted == false)
         {
@@ -166,8 +190,10 @@ public partial class MerchantGuildAuthority : Mobile
             var toDelete = new List<Item>(house.LockDowns);
 
             // Belt-and-suspenders: anything sitting in the footprint that
-            // was never actually locked down (dropped loose, or missed by
-            // LockDown's IsCoOwner/Movable checks) still gets swept and
+            // was never actually locked down (dropped loose, missed by
+            // LockDown's IsCoOwner/Movable checks, or - now that the
+            // vendor above is already gone - any stray backpack some
+            // other path still managed to drop) still gets swept and
             // deleted before the house itself goes, so nothing orphans on
             // the ground once the multi under it is gone.
             if (map != null && map != Map.Internal)
@@ -196,19 +222,6 @@ public partial class MerchantGuildAuthority : Mobile
             house.RemoveKeys(this);
 
             house.Delete();
-        }
-
-        // Mobile.Delete() already cascades to every item the vendor is
-        // wearing or carrying — Items[i].OnParentDeleted(this) defaults to
-        // Delete(), and Item.Delete() recurses into its own contents the
-        // same way, so a worn cloak or a backpack (and anything bundled
-        // inside it) all come apart on their own. Empty everything out
-        // explicitly first anyway, so teardown is never resting on that
-        // cascade alone.
-        if (vendor?.Deleted == false)
-        {
-            ClearVendorInventory(vendor);
-            vendor.Delete();
         }
 
         RemoveEntryAt(i);

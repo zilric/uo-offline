@@ -1,10 +1,12 @@
 // =========================================================================
-// InteriorTileFinder.cs — finds a safe, walkable interior tile to stand a
-// vendor on, instead of a hardcoded offset from the house's sign that can
-// clip into a wall, a door, or a locked-down fixture depending on which
-// house style got picked.
+// InteriorTileFinder.cs — finds safe, walkable, GROUND-FLOOR interior tiles
+// for a vendor to stand on (TryFindVendorSpot) or for clutter to sit
+// against a wall (the shared helpers below, also used by
+// DynamicClutterGenerator). Nothing here ever resolves to a sign-adjacent
+// exterior tile, a doorway, or an upper-floor offset.
 // =========================================================================
 
+using Server.Items;
 using Server.Multis;
 
 namespace Server.Engines.OrganicMarket;
@@ -12,20 +14,37 @@ namespace Server.Engines.OrganicMarket;
 public static class InteriorTileFinder
 {
     // How close a candidate tile can sit to a door before it's rejected -
-    // close enough and a spawned vendor blocks the doorway.
+    // close enough and a spawned vendor (or a piece of clutter) blocks the
+    // doorway.
     private const int DoorClearance = 1;
 
+    // Same idea for the house sign - it stands just outside the front
+    // door, and IsInside() alone doesn't always reject the tile directly
+    // underneath/beside it depending on house shape.
+    private const int SignClearance = 1;
+
     // How close a candidate tile can sit to a locked-down fixture (forge,
-    // anvil, keg, bookcase, ...) before it's rejected - the vendor
-    // shouldn't spawn standing inside/on top of one.
+    // anvil, keg, bookcase, clutter, ...) before it's rejected - nothing
+    // should spawn standing inside/on top of one.
     private const int FixtureClearance = 1;
+
+    // Ground-floor surface window, relative to house.Z (the multi's own
+    // placement Z - the fixed baseline for every style regardless of
+    // where its actual floorboards render). The negative low end covers a
+    // slightly recessed threshold; +18 comfortably covers a raised wooden
+    // floor while staying well under where a second story's own floor
+    // starts (a full story is ~20 Z units in UO's house art) - so this
+    // window can never resolve to an upper floor, a rooftop, or a
+    // basement on a multi-story style like TwoStoryHouse.
+    private const int MinGroundFloorOffset = -4;
+    private const int MaxGroundFloorOffset = 18;
 
     // Scans every rectangle in the house's own floor plan (BaseHouse.Area
     // - the same data HousePlacement.Check itself validates against) for
-    // the first tile that's genuinely walkable, inside the house, clear
-    // of doors and fixtures, and not the house's own multi tile. Returns
-    // false (with Point3D.Zero / Direction.South) if nothing qualifies,
-    // which callers should treat as "fall back to the sign location."
+    // the first tile that's genuinely walkable, inside the house, on the
+    // ground floor, and clear of doors/sign/fixtures. Returns false (with
+    // Point3D.Zero / Direction.South) if nothing qualifies, which callers
+    // should treat as "fall back to the sign location."
     public static bool TryFindVendorSpot(BaseHouse house, out Point3D loc, out Direction facing)
     {
         loc = Point3D.Zero;
@@ -37,7 +56,7 @@ public static class InteriorTileFinder
             return false;
         }
 
-        var faceTarget = house.Sign?.Location ?? house.BanLocation;
+        var faceTarget = FrontDoorLocation(house) ?? house.Sign?.Location ?? house.BanLocation;
 
         foreach (var rect in house.Area)
         {
@@ -51,7 +70,14 @@ public static class InteriorTileFinder
                     var x = x0 + dx;
                     var y = y0 + dy;
 
-                    if (!TryCandidate(house, map, x, y, out var candidate))
+                    if (!IsGroundFloorInterior(house, map, x, y, out var candidate))
+                    {
+                        continue;
+                    }
+
+                    if (IsNearDoor(house, x, y, DoorClearance) ||
+                        IsNearSign(house, x, y, SignClearance) ||
+                        IsNearFixture(house, x, y, candidate.Z, FixtureClearance))
                     {
                         continue;
                     }
@@ -66,11 +92,81 @@ public static class InteriorTileFinder
         return false;
     }
 
-    private static bool TryCandidate(BaseHouse house, Map map, int x, int y, out Point3D candidate)
+    // The door nearest the sign (the sign always stands at the front of
+    // the house, right by the entrance a real player would use) - falls
+    // back to null if the house has no sign or no doors yet, in which
+    // case callers fall back further to the sign itself or BanLocation.
+    public static Point3D? FrontDoorLocation(BaseHouse house)
+    {
+        if (house?.Doors is not { Count: > 0 } doors)
+        {
+            return null;
+        }
+
+        var signLoc = house.Sign?.Location;
+
+        BaseDoor best = null;
+        var bestDistSq = long.MaxValue;
+
+        foreach (var door in doors)
+        {
+            if (door?.Deleted != false)
+            {
+                continue;
+            }
+
+            if (signLoc is not { } sl)
+            {
+                best ??= door;
+                continue;
+            }
+
+            var dx = door.X - sl.X;
+            var dy = door.Y - sl.Y;
+            var distSq = (long)dx * dx + (long)dy * dy;
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                best = door;
+            }
+        }
+
+        return best?.Location;
+    }
+
+    // True if (x,y) is a genuinely walkable ground-floor interior tile -
+    // inside the house's own floor plan, on real floorboards, and clear
+    // enough for something to stand/sit on. Shared with
+    // DynamicClutterGenerator so both modules agree on what "ground floor"
+    // means.
+    public static bool IsGroundFloorInterior(BaseHouse house, Map map, int x, int y, out Point3D candidate)
     {
         candidate = Point3D.Zero;
 
-        var z = map.GetAverageZ(x, y);
+        // Map.GetAverageZ only ever looks at raw TERRAIN - it has no idea
+        // a house's own floorboards are static MULTI tiles sitting on top
+        // of it, offset from house.Z by whatever that house style's art
+        // says. Testing terrain Z against CanSpawnMobile rejected every
+        // interior tile outright (nothing walkable exists at bare ground
+        // level under a house's floor), so TryFindVendorSpot always came
+        // up empty and fell all the way back to the sign - a vendor
+        // spawning outside, under the sign, was that fallback firing.
+        //
+        // CanSpawnMobile's ranged overload is the engine's own answer to
+        // "where can something actually stand here": it walks land,
+        // static, AND MULTI tiles (Tiles.GetStaticAndMultiTiles) across a
+        // bounded Z window and returns the real surface it finds -
+        // correctly landing on the house's own floor. Bounding the window
+        // to house.Z's ground-floor offsets keeps it from ever resolving
+        // to an upper story.
+        if (!map.CanSpawnMobile(
+                x, y, house.Z + MinGroundFloorOffset, house.Z + MaxGroundFloorOffset,
+                canSwim: false, cantWalk: false, out var z
+            ))
+        {
+            return false;
+        }
+
         var loc = new Point3D(x, y, z);
 
         // Genuinely inside the house's floor plan, not just inside its
@@ -80,30 +176,39 @@ public static class InteriorTileFinder
             return false;
         }
 
-        // Walls, doors as static blockers, other mobiles, no floor to
-        // stand on, etc. - the same collision check used elsewhere in
-        // this codebase for landing a mobile on a tile (see
-        // MoongateTravel's arrival placement).
-        if (!map.CanSpawnMobile(x, y, z))
-        {
-            return false;
-        }
-
-        if (TooCloseToADoor(house, x, y))
-        {
-            return false;
-        }
-
-        if (TooCloseToAFixture(house, x, y, z))
-        {
-            return false;
-        }
-
         candidate = loc;
         return true;
     }
 
-    private static bool TooCloseToADoor(BaseHouse house, int x, int y)
+    // A tile against a wall/exterior boundary or tucked into a corner -
+    // one of its eight surrounding neighbors (cardinal AND diagonal) fails
+    // the same ground-floor-interior test this tile just passed. Diagonals
+    // are included deliberately: a strictly-cardinal check starves small
+    // interiors (SmallShop's tiny footprint especially) of eligible slots,
+    // rejecting corner tiles that are visibly "against the wall" the
+    // moment the room isn't a perfect open rectangle.
+    public static bool IsWallAdjacent(BaseHouse house, Map map, int x, int y)
+    {
+        for (var dx = -1; dx <= 1; dx++)
+        {
+            for (var dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0)
+                {
+                    continue;
+                }
+
+                if (!IsGroundFloorInterior(house, map, x + dx, y + dy, out _))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsNearDoor(BaseHouse house, int x, int y, int clearance)
     {
         if (house.Doors == null)
         {
@@ -117,7 +222,7 @@ public static class InteriorTileFinder
                 continue;
             }
 
-            if (Utility.InRange(door.X, door.Y, x, y, DoorClearance))
+            if (Utility.InRange(door.X, door.Y, x, y, clearance))
             {
                 return true;
             }
@@ -126,7 +231,13 @@ public static class InteriorTileFinder
         return false;
     }
 
-    private static bool TooCloseToAFixture(BaseHouse house, int x, int y, int z)
+    public static bool IsNearSign(BaseHouse house, int x, int y, int clearance)
+    {
+        var sign = house.Sign;
+        return sign?.Deleted == false && Utility.InRange(sign.X, sign.Y, x, y, clearance);
+    }
+
+    public static bool IsNearFixture(BaseHouse house, int x, int y, int z, int clearance)
     {
         foreach (var fixture in house.LockDowns)
         {
@@ -135,7 +246,7 @@ public static class InteriorTileFinder
                 continue;
             }
 
-            if (Utility.InRange(fixture.X, fixture.Y, x, y, FixtureClearance) &&
+            if (Utility.InRange(fixture.X, fixture.Y, x, y, clearance) &&
                 System.Math.Abs(fixture.Z - z) <= 4)
             {
                 return true;
@@ -151,7 +262,7 @@ public static class InteriorTileFinder
     // Left=SW, West, Up=NW), so diagonals need their own named value, not
     // an OR of two cardinals. Bearing is measured clockwise from North in
     // UO's screen-space axes (X east, Y south).
-    private static Direction DirectionTo(Point3D from, Point3D to)
+    public static Direction DirectionTo(Point3D from, Point3D to)
     {
         var dx = to.X - from.X;
         var dy = to.Y - from.Y;

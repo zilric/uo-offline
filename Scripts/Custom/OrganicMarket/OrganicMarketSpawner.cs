@@ -87,6 +87,15 @@ public static class OrganicMarketSpawner
         house.Public = true;
         house.MoveToWorld(center, map);
 
+        // house.Public only governs who may walk the interior region - the
+        // doors themselves are built already locked, keyed to `authority`
+        // (BaseHouse's AddEastDoor/AddSouthDoor helpers set Locked=true +
+        // KeyValue at construction, same as a real player's house), and
+        // that key never leaves authority's own bank box. Left alone, a
+        // real player can never open a single one of these doors. Public
+        // storefronts don't lock their own front door.
+        UnlockDoors(house);
+
         if (toMove != null)
         {
             foreach (var o in toMove)
@@ -103,20 +112,34 @@ public static class OrganicMarketSpawner
             }
         }
 
-        // Fixtures go down BEFORE the vendor spot is chosen: InteriorTileFinder
-        // reads house.LockDowns to steer clear of them, which only works if
-        // they're already locked down by the time it scans.
-        foreach (var fixture in BuildFixtures(archetype))
-        {
-            var loc = new Point3D(center.X + fixture.OffsetX, center.Y + fixture.OffsetY, center.Z);
-            fixture.Item.MoveToWorld(loc, map);
-            house.LockDown(authority, fixture.Item, false);
-        }
+        // Clutter goes down BEFORE the vendor spot is chosen: InteriorTileFinder
+        // reads house.LockDowns to steer clear of it, which only works if
+        // it's already locked down by the time it scans.
+        DynamicClutterGenerator.Furnish(house, archetype, authority);
 
         var vendor = SpawnVendor(authority, house, archetype);
 
         authority.Register(house, ArchetypeName(archetype), vendor);
         return authority.Count - 1;
+    }
+
+    private static void UnlockDoors(BaseHouse house)
+    {
+        if (house.Doors == null)
+        {
+            return;
+        }
+
+        foreach (var door in house.Doors)
+        {
+            if (door == null)
+            {
+                continue;
+            }
+
+            door.Locked = false;
+            door.KeyValue = 0;
+        }
     }
 
     private static BaseHouse BuildHouse(MarketHouseStyle style, Mobile owner) => style switch
@@ -153,7 +176,8 @@ public static class OrganicMarketSpawner
         if (!InteriorTileFinder.TryFindVendorSpot(house, out loc, out facing))
         {
             loc = house.Sign?.Location ?? new Point3D(house.X, house.Y - 1, house.Z);
-            facing = Direction.South;
+            var faceTarget = InteriorTileFinder.FrontDoorLocation(house) ?? house.BanLocation;
+            facing = InteriorTileFinder.DirectionTo(loc, faceTarget);
         }
 
         vendor.MoveToWorld(loc, house.Map);
@@ -200,35 +224,4 @@ public static class OrganicMarketSpawner
         Cloak      => "a cloak",
         _          => clothing.GetType().Name
     };
-
-    private readonly record struct FixtureSpawn(Item Item, int OffsetX, int OffsetY);
-
-    // Two thematic, mostly-stationary fixtures per archetype. Offsets are
-    // small and centered so they land inside every house style's floor
-    // area regardless of which one the operator picked.
-    private static IEnumerable<FixtureSpawn> BuildFixtures(MarketArchetype archetype)
-    {
-        switch (archetype)
-        {
-            case MarketArchetype.Blacksmith:
-                yield return new FixtureSpawn(new Forge(), -2, 2);
-                yield return new FixtureSpawn(new Anvil(), 2, 2);
-                break;
-
-            case MarketArchetype.MageAlchemist:
-                yield return new FixtureSpawn(new PotionKeg(), -2, 2);
-                yield return new FixtureSpawn(new FullBookcase(), 2, 2);
-                break;
-
-            case MarketArchetype.CurioRares:
-                yield return new FixtureSpawn(new Globe(), -2, 2);
-                yield return new FixtureSpawn(new LargeVase(), 2, 2);
-                break;
-
-            case MarketArchetype.TailorFletcher:
-                yield return new FixtureSpawn(new SewingKit(), -2, 2);
-                yield return new FixtureSpawn(new FletcherTools(), 2, 2);
-                break;
-        }
-    }
 }

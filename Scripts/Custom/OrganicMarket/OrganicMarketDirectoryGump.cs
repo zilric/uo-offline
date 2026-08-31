@@ -40,12 +40,26 @@ public class OrganicMarketDirectoryGump : DynamicGump
         from.SendGump(new OrganicMarketDirectoryGump(page));
     }
 
+    // Column x-positions for the four row-action buttons, spread out
+    // horizontally in one line instead of the old cramped 2x2 cluster
+    // (Teleport/Restock on one row, Delete/Move Vendor overlapping the
+    // one below it).
+    private const int ColTeleport   = 24;
+    private const int ColRestock    = 180;
+    private const int ColMoveVendor = 340;
+    private const int ColDelete     = 520;
+
     protected override void BuildLayout(ref DynamicGumpBuilder builder)
     {
-        const int width = 520;
-        const int rowHeight = 30;
+        // Widened from 520 to 650 so all four row-action buttons get their
+        // own clear horizontal slot instead of doubling up into a 2x2
+        // grid, and rows grew from 30 to 40px so the two-line
+        // info/actions layout below has clean breathing room.
+        const int width = 650;
+        const int rowHeight = 40;
         const int listTop = 90;
-        var height = listTop + PerPage * rowHeight + 60;
+        const int navY = listTop + PerPage * rowHeight + 20;
+        const int height = navY + 30;
 
         var authority = MerchantGuildAuthority.Instance;
         var total = authority?.Count ?? 0;
@@ -73,6 +87,7 @@ public class OrganicMarketDirectoryGump : DynamicGump
         {
             var row = i - start;
             var y = listTop + row * rowHeight;
+            var buttonY = y + 18;
 
             var house = authority.HouseAt(i);
             var alive = house?.Deleted == false;
@@ -83,35 +98,37 @@ public class OrganicMarketDirectoryGump : DynamicGump
 
             builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-18} {facet,-9} {loc.X},{loc.Y},{loc.Z}");
 
-            builder.AddButton(360, y, 4005, 4007, TeleportBase + i);
-            builder.AddLabel(384, y, 0x59, "Teleport");
+            builder.AddButton(ColTeleport, buttonY, 4005, 4007, TeleportBase + i);
+            builder.AddLabel(ColTeleport + 24, buttonY, 0x59, "Teleport");
 
-            builder.AddButton(440, y, 4005, 4007, RestockBase + i);
-            builder.AddLabel(464, y, 0x44, "Restock");
+            builder.AddButton(ColRestock, buttonY, 4005, 4007, RestockBase + i);
+            builder.AddLabel(ColRestock + 24, buttonY, 0x44, "Restock");
 
-            builder.AddButton(360, y + 14, 4017, 4019, DeleteBase + i);
-            builder.AddLabel(384, y + 14, 0x25, "Delete");
+            builder.AddButton(ColMoveVendor, buttonY, 4005, 4007, MoveVendorBase + i);
+            builder.AddLabel(ColMoveVendor + 24, buttonY, 0x59, "Move Vendor");
 
-            builder.AddButton(440, y + 14, 4005, 4007, MoveVendorBase + i);
-            builder.AddLabel(464, y + 14, 0x59, "Move Vendor");
+            builder.AddButton(ColDelete, buttonY, 4017, 4019, DeleteBase + i);
+            builder.AddLabel(ColDelete + 24, buttonY, 0x25, "Delete");
         }
 
-        var navY = listTop + PerPage * rowHeight + 10;
-
+        // Anchored together in the bottom-right region rather than
+        // scattered across the row (Prev far left, Back far right, Next
+        // stranded in the middle) - Prev/Next stay in fixed slots even
+        // when one is hidden, so Back never jumps around page to page.
         if (page > 0)
         {
-            builder.AddButton(24, navY, 4014, 4016, ButtonPrev);
-            builder.AddLabel(50, navY, 0x480, "Previous");
+            builder.AddButton(310, navY, 4014, 4016, ButtonPrev);
+            builder.AddLabel(336, navY, 0x480, "< Prev");
         }
 
         if (page < pageCount - 1)
         {
-            builder.AddButton(160, navY, 4005, 4007, ButtonNext);
-            builder.AddLabel(184, navY, 0x480, "Next");
+            builder.AddButton(430, navY, 4005, 4007, ButtonNext);
+            builder.AddLabel(456, navY, 0x480, "Next >");
         }
 
-        builder.AddButton(width - 100, navY, 4017, 4019, ButtonBack);
-        builder.AddLabel(width - 74, navY, 0x480, "Back");
+        builder.AddButton(540, navY, 4017, 4019, ButtonBack);
+        builder.AddLabel(566, navY, 0x480, "Back");
     }
 
     public override void OnResponse(NetState sender, in RelayInfo info)
