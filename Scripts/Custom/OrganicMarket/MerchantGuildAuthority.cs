@@ -37,7 +37,31 @@ public enum MarketHouseStyle
     StoneAndPlasterHouse,
     SandStonePatio,
     LogCabin,
-    SmallTower
+    SmallTower,
+
+    // SP-028: rounds out the catalog to every classic BaseHouse-derived
+    // style ModernUO actually ships (Multis/Houses/Houses.cs) - see
+    // OrganicMarketSpawner.BuildHouse for what's a genuinely distinct
+    // multi ID versus a documented naming alias for art this list already
+    // covers (ModernUO's stock house set doesn't have a separate class or
+    // multi ID for every name real-world UO players use for these).
+    SmallBrickHouse,
+    FieldStoneHouse,
+    TwoStoryStoneAndPlaster,
+    TwoStoryVilla,
+    TwoStoryLogCabin,
+    SandstoneHouseWithPatio,
+    MarbleHouseWithPatio,
+
+    // SP-029: the three grandest classic structures ModernUO ships - only
+    // ever rolled as a rare ambient-filler pick (see WorldHouseSeeder.
+    // SeedInhabitation), never a vendor-shop style. Castle's footprint
+    // alone is 31x31; finding open ground for these is expected to fail
+    // far more often than any other style, which is exactly why they're a
+    // low-probability roll rather than part of the normal rotation.
+    LargeTower,
+    Keep,
+    Castle
 }
 
 public enum MarketArchetype
@@ -151,23 +175,25 @@ public partial class MerchantGuildAuthority : Mobile
     // the precise filtering below.
     private const int FootprintSweepRange = 20;
 
-    // Deletes the vendor, the house, every item locked down in it OR
+    // Deletes every vendor the house actually has (SP-028: 1-4, not just
+    // the one MerchantGuildAuthority itself tracks as "primary" - see
+    // Register/VendorAt), the house, every item locked down in it OR
     // merely sitting in its footprint, and its door keys. Removes the slot
     // from every parallel list. Never throws — a half-torn-down entry
     // (house already gone, vendor already gone) is still cleanly dropped
     // from the registry.
     //
-    // Vendor goes FIRST, house second — deliberately. BaseHouse.OnAfterDelete()
+    // Vendors go FIRST, house second — deliberately. BaseHouse.OnAfterDelete()
     // calls KillVendors(), which calls PlayerVendor.Destroy(true) on
     // anything still sitting in house.PlayerVendors, and Destroy(true)
     // drops a loose backpack with whatever's left in it onto the ground
     // before deleting the vendor — that's the real source of "deleting a
     // house drops the vendor's backpack," not anything Mobile.Delete()
-    // itself does. Clearing and deleting the vendor here first means its
-    // own OnAfterDelete already sets House = null, which — via the House
-    // field's fieldChanged hook, PlayerVendor.OnHouseChanged — removes it
-    // from house.PlayerVendors. By the time house.Delete() runs and
-    // KillVendors() looks, there's nothing left in the list to evict.
+    // itself does. Clearing and deleting every vendor here first means
+    // each one's own OnAfterDelete already sets House = null, which — via
+    // the House field's fieldChanged hook, PlayerVendor.OnHouseChanged —
+    // removes it from house.PlayerVendors. By the time house.Delete() runs
+    // and KillVendors() looks, there's nothing left in the list to evict.
     public bool DeleteAt(int i)
     {
         if (i < 0 || i >= _houses.Count)
@@ -178,16 +204,34 @@ public partial class MerchantGuildAuthority : Mobile
         var house = _houses[i];
         var vendor = _vendors[i];
 
-        if (vendor?.Deleted == false)
+        if (house?.Deleted == false)
         {
-            // Belt-and-suspenders on top of the fieldChanged hook above -
-            // guarantees KillVendors() (below, inside house.Delete()) has
-            // nothing to find regardless of deletion order elsewhere.
-            if (vendor is PlayerVendor && house != null)
+            // Copy first — removing a vendor from house.PlayerVendors (the
+            // fieldChanged hook above) mutates that same list as it goes,
+            // which would otherwise skip entries mid-loop.
+            var allVendors = new List<PlayerVendor>(house.PlayerVendors);
+            foreach (var houseVendor in allVendors)
             {
-                house.PlayerVendors.Remove((PlayerVendor)vendor);
-            }
+                if (houseVendor?.Deleted != false)
+                {
+                    continue;
+                }
 
+                // Belt-and-suspenders on top of the fieldChanged hook -
+                // guarantees KillVendors() (below, inside house.Delete())
+                // has nothing left to find regardless of deletion order
+                // elsewhere.
+                house.PlayerVendors.Remove(houseVendor);
+                ClearVendorInventory(houseVendor);
+                houseVendor.Delete();
+            }
+        }
+        else if (vendor?.Deleted == false)
+        {
+            // House is already gone but the tracked primary vendor
+            // somehow isn't (a half-torn-down entry) - there's no
+            // house.PlayerVendors left to iterate, so clean this one up
+            // directly.
             ClearVendorInventory(vendor);
             vendor.Delete();
         }

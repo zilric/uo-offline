@@ -1,11 +1,12 @@
 // =========================================================================
 // InteriorTileFinder.cs — finds safe, walkable, GROUND-FLOOR interior tiles
-// for a vendor to stand on (TryFindVendorSpot) or for clutter to sit
+// for 1-4 vendors to stand on (TryFindVendorSpots) or for clutter to sit
 // against a wall (the shared helpers below, also used by
 // DynamicClutterGenerator). Nothing here ever resolves to a sign-adjacent
 // exterior tile, a doorway, or an upper-floor offset.
 // =========================================================================
 
+using System.Collections.Generic;
 using Server.Items;
 using Server.Multis;
 
@@ -39,21 +40,28 @@ public static class InteriorTileFinder
     private const int MinGroundFloorOffset = -4;
     private const int MaxGroundFloorOffset = 18;
 
-    // Scans every rectangle in the house's own floor plan (BaseHouse.Area
-    // - the same data HousePlacement.Check itself validates against) for
-    // the first tile that's genuinely walkable, inside the house, on the
-    // ground floor, and clear of doors/sign/fixtures. Returns false (with
-    // Point3D.Zero / Direction.South) if nothing qualifies, which callers
-    // should treat as "fall back to the sign location."
-    public static bool TryFindVendorSpot(BaseHouse house, out Point3D loc, out Direction facing)
+
+    // How far apart two vendor spots (found in the same TryFindVendorSpots
+    // call) must be - the task's requested 1-2 tile minimum clearance so
+    // multiple vendors in one shop don't crowd or overlap.
+    private const int VendorSpacing = 2;
+
+    // SP-028: scans the house's own floor plan (BaseHouse.Area) for up to
+    // `count` ground-floor interior tiles, each also kept clear of every
+    // OTHER spot already chosen this call (VendorSpacing) as well as
+    // doors/sign/fixtures. Returns however many it actually found - which
+    // can be fewer than `count` on a small floor plan - so callers should
+    // treat the result list's
+    // own length as the real vendor count for this house, not assume it
+    // always equals what was asked for.
+    public static List<(Point3D Loc, Direction Facing)> TryFindVendorSpots(BaseHouse house, int count)
     {
-        loc = Point3D.Zero;
-        facing = Direction.South;
+        var results = new List<(Point3D Loc, Direction Facing)>();
 
         var map = house?.Map;
-        if (house == null || map == null || map == Map.Internal)
+        if (house == null || map == null || map == Map.Internal || count <= 0)
         {
-            return false;
+            return results;
         }
 
         var faceTarget = FrontDoorLocation(house) ?? house.Sign?.Location ?? house.BanLocation;
@@ -77,15 +85,31 @@ public static class InteriorTileFinder
 
                     if (IsNearDoor(house, x, y, DoorClearance) ||
                         IsNearSign(house, x, y, SignClearance) ||
-                        IsNearFixture(house, x, y, candidate.Z, FixtureClearance))
+                        IsNearFixture(house, x, y, candidate.Z, FixtureClearance) ||
+                        TooCloseToChosen(results, x, y, VendorSpacing))
                     {
                         continue;
                     }
 
-                    loc = candidate;
-                    facing = DirectionTo(candidate, faceTarget);
-                    return true;
+                    results.Add((candidate, DirectionTo(candidate, faceTarget)));
+                    if (results.Count >= count)
+                    {
+                        return results;
+                    }
                 }
+            }
+        }
+
+        return results;
+    }
+
+    private static bool TooCloseToChosen(List<(Point3D Loc, Direction Facing)> chosen, int x, int y, int clearance)
+    {
+        foreach (var (loc, _) in chosen)
+        {
+            if (Utility.InRange(loc.X, loc.Y, x, y, clearance))
+            {
+                return true;
             }
         }
 
@@ -148,8 +172,8 @@ public static class InteriorTileFinder
         // of it, offset from house.Z by whatever that house style's art
         // says. Testing terrain Z against CanSpawnMobile rejected every
         // interior tile outright (nothing walkable exists at bare ground
-        // level under a house's floor), so TryFindVendorSpot always came
-        // up empty and fell all the way back to the sign - a vendor
+        // level under a house's floor), so this always came up empty and
+        // fell all the way back to the sign - a vendor
         // spawning outside, under the sign, was that fallback firing.
         //
         // CanSpawnMobile's ranged overload is the engine's own answer to

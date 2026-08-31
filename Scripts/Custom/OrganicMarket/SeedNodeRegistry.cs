@@ -46,7 +46,7 @@ public static class SeedNodeRegistry
         // immediately around Britain's own bank (1433,1689).
         new(
             "Britain-Yew Road Corridor",
-            new Point3D(1000, 1350, 0),
+            new Point3D(986, 1353, 0),
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
@@ -56,7 +56,7 @@ public static class SeedNodeRegistry
         // North of Britain, toward the Shrine of Compassion.
         new(
             "Britain North Farmland Crossroads",
-            new Point3D(1300, 1250, 0),
+            new Point3D(1297, 1274, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
@@ -67,7 +67,7 @@ public static class SeedNodeRegistry
         // it, Minoc.
         new(
             "Britain East Bridge Highway",
-            new Point3D(1700, 1550, 0),
+            new Point3D(1725, 1478, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.LargePatio,
@@ -77,7 +77,7 @@ public static class SeedNodeRegistry
         // South of Britain on the coast road down toward Trinsic.
         new(
             "Britain South Coast Road",
-            new Point3D(1600, 2050, 0),
+            new Point3D(1617, 2076, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.SandStonePatio,
@@ -87,7 +87,7 @@ public static class SeedNodeRegistry
         // Paws, the small farming village between Britain and Yew.
         new(
             "Paws Village Crossroads",
-            new Point3D(950, 1050, 0),
+            new Point3D(927, 1053, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
@@ -97,7 +97,7 @@ public static class SeedNodeRegistry
         // The court road running into Yew proper.
         new(
             "Yew Court Road Crossing",
-            new Point3D(790, 1000, 0),
+            new Point3D(800, 1010, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
@@ -107,7 +107,7 @@ public static class SeedNodeRegistry
         // Forest junction near Empath Abbey, west of Yew.
         new(
             "Yew Empath Abbey Forest Junction",
-            new Point3D(720, 1100, 0),
+            new Point3D(712, 1088, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.SmallShop,
@@ -115,9 +115,18 @@ public static class SeedNodeRegistry
         ),
 
         // Mainland side of the Skara Brae ferry crossing.
+        //
+        // SP-030: was (769,2144) - in-game visual testing found a house
+        // placed directly on top of an existing roadside tavern's deck at
+        // (773,2144) (HousePlacement.Check's own static-collision rule
+        // doesn't reject a walkable Background-flagged floor overlay - see
+        // OrganicMarketSpawner.HasFootprintConflict for the actual fix).
+        // Empirically re-verified via the same ring search this time WITH
+        // that fix active (SP-030 diagnostic history): nearest genuinely
+        // open meadow ground sits 37 tiles east-southeast, at (806,2149).
         new(
             "Skara Brae Mainland Ferry Crossroads",
-            new Point3D(600, 2200, 0),
+            new Point3D(806, 2149, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
@@ -128,7 +137,7 @@ public static class SeedNodeRegistry
         // Trinsic.
         new(
             "Hedge Maze Southern Road Junction",
-            new Point3D(1550, 1650, 0),
+            new Point3D(1721, 1475, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.LargePatio,
@@ -139,7 +148,7 @@ public static class SeedNodeRegistry
         // toward Britain.
         new(
             "Trinsic North Gateway Crossroads",
-            new Point3D(1899, 2550, 0),
+            new Point3D(1882, 2516, 0),
             Map.Felucca,
             45,
             MarketHouseStyle.SandStonePatio,
@@ -149,7 +158,7 @@ public static class SeedNodeRegistry
         // West of Trinsic, on the paladin road out past the guard gate.
         new(
             "Trinsic West Guard Gate",
-            new Point3D(1750, 2688, 0),
+            new Point3D(1777, 2718, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
@@ -159,7 +168,7 @@ public static class SeedNodeRegistry
         // Farmland crossroads on Jhelom's main island.
         new(
             "Jhelom Farmland Crossroads",
-            new Point3D(1300, 3650, 0),
+            new Point3D(1214, 3576, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
@@ -171,7 +180,7 @@ public static class SeedNodeRegistry
         // largest style this tool places.
         new(
             "Vesper-Minoc Northern Passage",
-            new Point3D(2750, 750, 0),
+            new Point3D(2773, 775, 0),
             Map.Felucca,
             45,
             MarketHouseStyle.LargePatio,
@@ -182,7 +191,7 @@ public static class SeedNodeRegistry
         // matching how tight mining-town terrain tends to run.
         new(
             "Minoc Mountain Pass Road",
-            new Point3D(2620, 480, 0),
+            new Point3D(2664, 451, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.SmallShop,
@@ -192,7 +201,7 @@ public static class SeedNodeRegistry
         // West of Cove, on the road toward Britain.
         new(
             "Cove City West Crossroads",
-            new Point3D(2100, 1150, 0),
+            new Point3D(2067, 1168, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
@@ -203,7 +212,7 @@ public static class SeedNodeRegistry
         // near the Shrine of Compassion.
         new(
             "Compassion Desert Border Crossing",
-            new Point3D(2100, 1000, 0),
+            new Point3D(2084, 1016, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.SandStonePatio,
@@ -216,7 +225,7 @@ public static class SeedNodeRegistry
         // outside its own walls.
         new(
             "Moonglow Outskirts Crossroads",
-            new Point3D(4400, 1250, 0),
+            new Point3D(4390, 1244, 0),
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
@@ -227,7 +236,7 @@ public static class SeedNodeRegistry
         // space constraint as the outskirts node above.
         new(
             "Moonglow Lycaeum Road",
-            new Point3D(4420, 1200, 0),
+            new Point3D(4448, 1234, 0),
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
@@ -237,18 +246,26 @@ public static class SeedNodeRegistry
         // Northern outskirts of Ocllo, the island Magincia sits on.
         new(
             "Ocllo Town Northern Outskirts",
-            new Point3D(3700, 2500, 0),
+            new Point3D(3711, 2511, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
             MarketArchetype.CurioRares
         ),
 
-        // Mainland-side approach to Nujel'm's trade port, rather than the
-        // island itself.
+        // SP-029: was "Nujel'm Mainland Trade Port Road" at (3200,1100) -
+        // confirmed via direct probing (see this file's own SP-029
+        // diagnostic history) that Nujel'm is a genuinely small, densely
+        // built island with no open buildable ground anywhere within 1500
+        // tiles of its own coastline in any direction; even the town's own
+        // interior came up with zero placement-valid tiles among the 449
+        // candidates that made it past the region check. No anchor near
+        // Nujel'm was going to satisfy this node, so it's retargeted here
+        // instead - Buccaneer's Den is a real trade-port town with actual
+        // open coastal ground nearby.
         new(
-            "Nujel'm Mainland Trade Port Road",
-            new Point3D(3200, 1100, 0),
+            "Buccaneer's Den Trade Anchorage",
+            new Point3D(2796, 2228, 0),
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
@@ -378,7 +395,58 @@ public static class SeedNodeRegistry
             ("Britain Riverside", 1550, 1550),
             ("Trinsic Riverside", 1850, 2500),
             ("Vesper Woodland", 2700, 750),
-            ("Minoc Riverside", 2450, 650)
+            ("Minoc Riverside", 2450, 650),
+
+            // SP-029: task 4 wants the catalog grown further toward a
+            // 100-150+ total placement target (each of these, like every
+            // node above, also gets WorldHouseSeeder.SeedInhabitation's
+            // own cluster-mate attempt - one named node seeds a small
+            // neighborhood, not exactly one house).
+
+            // Farmland tracts
+            ("Britain Farmland Tract East", 1750, 1450),
+            ("Trinsic Farmland Tract North", 1950, 2400),
+            ("Vesper Farmland Tract West", 2600, 700),
+            ("Yew Farmland Tract South", 850, 1150),
+            ("Minoc Farmland Tract East", 2500, 550),
+            ("Jhelom Farmland Tract North", 1350, 3500),
+
+            // Valley clearings, near (but not on top of) the virtue
+            // shrines above
+            ("Compassion Valley Clearing", 1350, 1450),
+            ("Honor Valley Clearing", 2600, 600),
+            ("Justice Valley Clearing", 1550, 1600),
+            ("Spirituality Valley Clearing", 1800, 1250),
+            ("Sacrifice Valley Clearing", 750, 850),
+            ("Humility Valley Clearing", 800, 1350),
+
+            // Coastline settlements
+            ("Britain Coastal Hamlet", 1500, 2200),
+            ("Trinsic Coastal Hamlet", 2000, 2950),
+            ("Vesper Coastal Hamlet", 3050, 650),
+            ("Skara Brae Coastal Hamlet", 550, 2100),
+            // SP-030: was (4550,1300) - in-game visual testing found an
+            // ambient house spawned inside Moonglow's cemetery grounds
+            // among gravestones and undead spawns at (4552,1314). No
+            // Region bounds that cemetery at all on this server (confirmed:
+            // no "Moonglow Cemetery" entry in Distribution/Data/
+            // regions.json - see WorldHouseSeeder.IsCemeteryRegion and
+            // OrganicMarketSpawner.HasFootprintConflict's gravestone-static
+            // scan, the actual fix). Empirically re-verified with that fix
+            // active: nearest genuinely clear ground sits 51 tiles
+            // northwest, at (4510,1269).
+            ("Moonglow Coastal Hamlet", 4510, 1269),
+            ("Nujel'm Coastal Hamlet", 3450, 1150),
+            ("Ocllo Coastal Hamlet", 3750, 2450),
+
+            // Forest hamlets
+            ("Yew Forest Hamlet", 700, 950),
+            ("Britain Forest Hamlet North", 1150, 1200),
+            ("Deceit Forest Hamlet", 4050, 1050),
+            ("Spine Forest Hamlet", 2350, 750),
+            ("Compassion Forest Hamlet", 1350, 1300),
+            ("Trinsic Forest Hamlet", 1850, 2200),
+            ("Delucia Forest Hamlet", 1400, 3700)
         };
 
         // Cycled round-robin across all 32 nodes purely for visual variety
