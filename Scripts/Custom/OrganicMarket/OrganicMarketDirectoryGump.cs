@@ -1,0 +1,240 @@
+// =========================================================================
+// OrganicMarketDirectoryGump.cs — paged directory of every registered
+// Organic Market house (7 per page), with per-entry Teleport / Restock /
+// Delete actions and Prev/Next paging.
+// =========================================================================
+
+using System;
+using Server.Gumps;
+using Server.Network;
+
+namespace Server.Engines.OrganicMarket;
+
+public class OrganicMarketDirectoryGump : DynamicGump
+{
+    public override bool Singleton => true;
+
+    private const int PerPage = 7;
+    private const int ButtonBack = 1;
+    private const int ButtonPrev = 2;
+    private const int ButtonNext = 3;
+    private const int TeleportBase = 1000;
+    private const int RestockBase = 2000;
+    private const int DeleteBase = 3000;
+    private const int MoveVendorBase = 4000;
+
+    private readonly int _page;
+
+    private OrganicMarketDirectoryGump(int page) : base(50, 30)
+    {
+        _page = Math.Max(0, page);
+    }
+
+    public static void DisplayTo(Mobile from, int page)
+    {
+        if (from?.NetState == null)
+        {
+            return;
+        }
+
+        from.SendGump(new OrganicMarketDirectoryGump(page));
+    }
+
+    protected override void BuildLayout(ref DynamicGumpBuilder builder)
+    {
+        const int width = 520;
+        const int rowHeight = 30;
+        const int listTop = 90;
+        var height = listTop + PerPage * rowHeight + 60;
+
+        var authority = MerchantGuildAuthority.Instance;
+        var total = authority?.Count ?? 0;
+        var pageCount = Math.Max(1, (total + PerPage - 1) / PerPage);
+        var page = Math.Clamp(_page, 0, pageCount - 1);
+        var start = page * PerPage;
+        var end = Math.Min(start + PerPage, total);
+
+        builder.AddPage();
+        builder.AddBackground(0, 0, width, height, 5054);
+        builder.AddAlphaRegion(10, 10, width - 20, height - 20);
+
+        builder.AddHtml(
+            20, 16, width - 40, 20,
+            $"<center><basefont color=#FFD700>Market House Directory — page {page + 1}/{pageCount}</basefont></center>"
+        );
+        builder.AddHtml(20, 38, width - 40, 20, "<basefont color=#7FFFD4>ID   Archetype           Facet      X, Y, Z</basefont>");
+
+        if (total == 0)
+        {
+            builder.AddLabel(24, listTop, 0x480, "No market houses are registered yet.");
+        }
+
+        for (var i = start; i < end; i++)
+        {
+            var row = i - start;
+            var y = listTop + row * rowHeight;
+
+            var house = authority.HouseAt(i);
+            var alive = house?.Deleted == false;
+            var id = authority.HouseIdAt(i);
+            var archetype = authority.ArchetypeAt(i);
+            var facet = alive ? house.Map?.ToString() ?? "?" : "(gone)";
+            var loc = alive ? house.Location : Point3D.Zero;
+
+            builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-18} {facet,-9} {loc.X},{loc.Y},{loc.Z}");
+
+            builder.AddButton(360, y, 4005, 4007, TeleportBase + i);
+            builder.AddLabel(384, y, 0x59, "Teleport");
+
+            builder.AddButton(440, y, 4005, 4007, RestockBase + i);
+            builder.AddLabel(464, y, 0x44, "Restock");
+
+            builder.AddButton(360, y + 14, 4017, 4019, DeleteBase + i);
+            builder.AddLabel(384, y + 14, 0x25, "Delete");
+
+            builder.AddButton(440, y + 14, 4005, 4007, MoveVendorBase + i);
+            builder.AddLabel(464, y + 14, 0x59, "Move Vendor");
+        }
+
+        var navY = listTop + PerPage * rowHeight + 10;
+
+        if (page > 0)
+        {
+            builder.AddButton(24, navY, 4014, 4016, ButtonPrev);
+            builder.AddLabel(50, navY, 0x480, "Previous");
+        }
+
+        if (page < pageCount - 1)
+        {
+            builder.AddButton(160, navY, 4005, 4007, ButtonNext);
+            builder.AddLabel(184, navY, 0x480, "Next");
+        }
+
+        builder.AddButton(width - 100, navY, 4017, 4019, ButtonBack);
+        builder.AddLabel(width - 74, navY, 0x480, "Back");
+    }
+
+    public override void OnResponse(NetState sender, in RelayInfo info)
+    {
+        var from = sender.Mobile;
+        if (from == null)
+        {
+            return;
+        }
+
+        var authority = MerchantGuildAuthority.Instance;
+        var buttonId = info.ButtonID;
+
+        if (buttonId == ButtonBack)
+        {
+            OrganicMarketAdminGump.DisplayTo(from);
+            return;
+        }
+
+        if (buttonId == ButtonPrev)
+        {
+            DisplayTo(from, _page - 1);
+            return;
+        }
+
+        if (buttonId == ButtonNext)
+        {
+            DisplayTo(from, _page + 1);
+            return;
+        }
+
+        if (authority == null)
+        {
+            return;
+        }
+
+        if (buttonId >= MoveVendorBase)
+        {
+            var index = buttonId - MoveVendorBase;
+            BeginMoveVendor(from, authority, index, _page);
+            return;
+        }
+
+        if (buttonId >= DeleteBase)
+        {
+            var index = buttonId - DeleteBase;
+            if (authority.DeleteAt(index))
+            {
+                from.SendMessage($"Deleted market house #{index}.");
+            }
+
+            DisplayTo(from, _page);
+            return;
+        }
+
+        if (buttonId >= RestockBase)
+        {
+            var index = buttonId - RestockBase;
+            from.SendMessage(
+                authority.RestockAt(index)
+                    ? "Vendor restocked."
+                    : "That vendor could not be restocked (missing or already deleted)."
+            );
+            DisplayTo(from, _page);
+            return;
+        }
+
+        if (buttonId >= TeleportBase)
+        {
+            var index = buttonId - TeleportBase;
+            TeleportTo(from, authority, index);
+            DisplayTo(from, _page);
+        }
+    }
+
+    private static void TeleportTo(Mobile from, MerchantGuildAuthority authority, int index)
+    {
+        if (index < 0 || index >= authority.Count)
+        {
+            return;
+        }
+
+        var house = authority.HouseAt(index);
+        if (house?.Deleted != false)
+        {
+            from.SendMessage("That house no longer exists.");
+            return;
+        }
+
+        var dest = house.Sign?.Location ?? house.Location;
+        var map = house.Map;
+        if (map == null || map == Map.Internal)
+        {
+            from.SendMessage("That house has no valid map.");
+            return;
+        }
+
+        from.MoveToWorld(dest, map);
+        from.SendMessage($"Teleported to market house #{authority.HouseIdAt(index)}.");
+    }
+
+    private static void BeginMoveVendor(Mobile from, MerchantGuildAuthority authority, int index, int page)
+    {
+        if (index < 0 || index >= authority.Count)
+        {
+            return;
+        }
+
+        var house = authority.HouseAt(index);
+        if (house?.Deleted != false)
+        {
+            from.SendMessage("That house no longer exists.");
+            return;
+        }
+
+        var vendor = authority.VendorAt(index);
+        if (vendor?.Deleted != false)
+        {
+            from.SendMessage("That vendor no longer exists.");
+            return;
+        }
+
+        from.SendMessage("Target a tile inside the house to move the vendor there.");
+        from.Target = new MoveVendorTarget(house, vendor, page);
+    }
+}

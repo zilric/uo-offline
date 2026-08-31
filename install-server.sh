@@ -550,19 +550,34 @@ autodetect_uo_data() {
   return 1
 }
 
-# copy_uo_data — copy whatever UO asset files exist at $1 straight into
+# copy_uo_data — full recursive copy of the UO client tree at $1 into
 # ${INSTALL_ROOT}/uo-data (UO_DATA_DIR). No symlinking: ModernUO's data
 # directory ends up a real, self-contained copy inside the workspace.
 #
-# Copies by file pattern rather than the whole tree, so pointing this at a
-# live client install (docs, screenshots, saved characters, the client
-# binary itself) only pulls in the data files ModernUO actually reads.
-# -maxdepth 1 keeps the destination flat - no nested subfolders get
-# created, and re-running (a re-install, or pointing at a newer client)
-# just overwrites the same files in place rather than duplicating anything.
+# Copies everything, not a fixed extension allow-list. A filtered copy has
+# already silently broken things once (cliloc.* wasn't in the original
+# pattern, so Localization.GetText() always came back null - see
+# patches/0006) and the same shape of bug is just as possible for any other
+# file ModernUO or a future feature reads that doesn't happen to end in
+# .mul/.uop/.idx/.def - music, fonts, gump art, speech tables, extra
+# language files. Simplest way to stop guessing the list is to not filter
+# at all.
+#
+# "${src}/." (not "${src}") copies the directory's *contents* into
+# UO_DATA_DIR - without that trailing "/.", cp would nest the whole client
+# folder one level deeper (UO_DATA_DIR/UOClient/...) instead of landing its
+# files directly in UO_DATA_DIR. "${1%/}" strips any trailing slash the
+# caller passed first, so this is correct either way. -a preserves
+# permissions/timestamps/symlinks and recurses through every subdirectory.
+#
+# Purely additive: nothing already in UO_DATA_DIR is removed first, so a
+# re-run (re-install, or pointing at a newer client) overwrites same-path
+# files in place and leaves everything else - including
+# _backup-modern-map/, which swap_t2a_map keeps inside this same
+# directory - untouched.
 # ---------------------------------------------------------------------------
 copy_uo_data() {
-  local src="$1"
+  local src="${1%/}"
   mkdir -p "${UO_DATA_DIR}"
 
   # Already exactly the target location (the default "no data yet" path
@@ -572,18 +587,23 @@ copy_uo_data() {
     return
   fi
 
-  say "Copying UO data files: ${src} -> ${UO_DATA_DIR}"
-  local copied=0 f
-  while IFS= read -r -d '' f; do
-    cp -f "${f}" "${UO_DATA_DIR}/"
-    copied=$((copied + 1))
-  done < <(find "${src}" -maxdepth 1 -type f \
-    \( -iname '*.mul' -o -iname '*.uop' -o -iname '*.idx' -o -iname '*.def' \
-       -o -iname 'tiledata.*' \) \
-    -print0 2>/dev/null)
+  if [[ ! -d "${src}" ]]; then
+    warn "UO data source ${src} is not a directory; nothing copied."
+    return
+  fi
 
-  [[ "${copied}" -gt 0 ]] || warn "No matching UO data files (*.mul/*.uop/*.idx/*.def) found in ${src}."
-  ok "Copied ${copied} file(s) into ${UO_DATA_DIR}."
+  say "Copying full UO client tree: ${src} -> ${UO_DATA_DIR}"
+
+  # A whole client directory can contain a stray unreadable/broken-symlink
+  # file (permissions, a dead Wine prefix link); one bad file shouldn't
+  # abort the entire install under set -e, so this is best-effort.
+  if ! cp -a "${src}/." "${UO_DATA_DIR}/"; then
+    warn "cp reported errors copying some files from ${src} - continuing with what did copy."
+  fi
+
+  local count
+  count="$(find "${UO_DATA_DIR}" -type f 2>/dev/null | wc -l)"
+  ok "Copied ${count} file(s) into ${UO_DATA_DIR}."
   UO_DATA="${UO_DATA_DIR}"
 }
 
@@ -768,25 +788,40 @@ fetch_spawn_map() {
 # ---------------------------------------------------------------------------
 # Step 8 — Write ModernUO config (LAN listener, auto account creation)
 # ---------------------------------------------------------------------------
-write_modernuo_config() {
+write_modernuo_json() {
   # Keep a shard name that is already set. Renaming an existing shard makes
   # returning players' saved settings look like they belong to a different
-  # server. Only a fresh install gets ours.
+  # server. Only a fresh install (or one missing this file) gets ours.
+  #
+  # The grep is allowed to find nothing - an existing modernuo.json that
+  # predates this key, or one the server itself rewrote with a different
+  # key set, is a normal case, not an error. Without the `|| true` here,
+  # grep's exit 1 on no-match propagates through the pipeline (pipefail)
+  # into the `local _prev=$(...)` assignment, and set -e treats that
+  # assignment's failure as fatal - the function would die right here,
+  # silently, on every install/update whose existing config just doesn't
+  # happen to have this exact key yet.
   RESOLVED_SHARD_NAME="${SHARD_NAME}"
   local _cfg="${CFG_DIR}/modernuo.json"
   if [[ -f "${_cfg}" ]]; then
-    local _prev
-    _prev="$(grep -oE '"serverListing\.serverName"[[:space:]]*:[[:space:]]*"[^"]*"' "${_cfg}" \
-      | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/')"
+    local _prev=""
+    _prev="$(grep -oE '"serverListing\.serverName"[[:space:]]*:[[:space:]]*"[^"]*"' "${_cfg}" 2>/dev/null \
+      | head -n1 | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/' || true)"
     if [[ -n "${_prev}" ]]; then
       RESOLVED_SHARD_NAME="${_prev}"
       say "Keeping this install's existing shard name: ${_prev}"
     fi
   fi
 
-  banner "Writing ModernUO configuration"
-
   mkdir -p "${CFG_DIR}"
+
+  # UO_DATA is only ever resolved (by resolve_uo_data / copy_uo_data)
+  # during a fresh install; ensure_modernuo_config can also reach this
+  # function from `update`, where nothing set it and set -u would
+  # otherwise make the heredoc below die on an unbound variable. Fall
+  # back to the fixed uo-data location every install already copies data
+  # into (UO_DATA_DIR, set once at script start-up regardless of action).
+  local _data_dir="${UO_DATA:-${UO_DATA_DIR}}"
 
   # modernuo.json — server runtime config.
   #
@@ -796,10 +831,10 @@ write_modernuo_config() {
   # right behavior on a LAN box, where "the server's address" depends on
   # which interface/IP a given client reached it through, and a fixed
   # 127.0.0.1 would send every remote client back to their own machine.
-  cat > "${CFG_DIR}/modernuo.json" <<EOF
+  cat > "${_cfg}" <<EOF
 {
   "assemblyDirectories": ["./Assemblies"],
-  "dataDirectories": ["${UO_DATA}"],
+  "dataDirectories": ["${_data_dir}"],
   "listeners": ["${LISTEN_ADDR}"],
   "settings": {
     "accountHandler.maxAccountsPerIP": "10",
@@ -814,9 +849,12 @@ write_modernuo_config() {
 }
 EOF
   ok "Wrote modernuo.json (listening on ${LISTEN_ADDR}, auto account creation on)"
+}
 
+write_expansion_json() {
   # expansion.json — the REAL schema, capitalized keys, all flags spelled out.
   # T2A gets Felucca map only, ExpansionT2A flag on, LiveAccount on.
+  mkdir -p "${CFG_DIR}"
   cat > "${CFG_DIR}/expansion.json" <<EOF
 {
   "Id": ${EXPANSION_ID},
@@ -898,7 +936,9 @@ EOF
 }
 EOF
   ok "Wrote expansion.json (T2A, Felucca-only)"
+}
 
+write_feature_flags_json() {
   # FeatureFlags/flags.json - the Young player system is a UO:R-era feature
   # that did not exist in T2A. Left on, young characters also get a
   # Trammel-only public moongate list, which filters down to nothing on this
@@ -919,6 +959,50 @@ EOF
 ]
 EOF
   ok "Wrote FeatureFlags/flags.json (Young player system off - not a T2A feature)"
+}
+
+# All three configs, unconditionally. Used by a fresh install, where
+# there's nothing yet to preserve.
+write_modernuo_config() {
+  banner "Writing ModernUO configuration"
+  write_modernuo_json
+  write_expansion_json
+  write_feature_flags_json
+}
+
+# Fills in only what's actually missing. Used by `update`, which otherwise
+# deliberately never touches Configuration/ (see do_update) - this exists
+# for the one case that isn't "leave it alone": a config directory that's
+# missing a file outright (an interrupted previous run, a manual delete,
+# a still-default install this repo's own history has hit) would
+# otherwise leave the server stuck at a first-run wizard prompt instead of
+# booting headless. An existing file, however incomplete its keys, is left
+# untouched - regenerating it wholesale is exactly the clobber do_update
+# promises not to do.
+ensure_modernuo_config() {
+  local wrote_any=0
+
+  if [[ ! -f "${CFG_DIR}/modernuo.json" ]]; then
+    banner "Regenerating missing ModernUO configuration"
+    write_modernuo_json
+    wrote_any=1
+  fi
+
+  if [[ ! -f "${CFG_DIR}/expansion.json" ]]; then
+    [[ "${wrote_any}" == "1" ]] || banner "Regenerating missing ModernUO configuration"
+    write_expansion_json
+    wrote_any=1
+  fi
+
+  if [[ ! -f "${CFG_DIR}/FeatureFlags/flags.json" ]]; then
+    [[ "${wrote_any}" == "1" ]] || banner "Regenerating missing ModernUO configuration"
+    write_feature_flags_json
+    wrote_any=1
+  fi
+
+  if [[ "${wrote_any}" == "0" ]]; then
+    say "Configuration/ already has modernuo.json, expansion.json, and FeatureFlags/flags.json. Leaving them as they are."
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1300,6 +1384,53 @@ install_playerbots() {
 }
 
 # ---------------------------------------------------------------------------
+# Organic Market admin tool: deploy Scripts/Custom/OrganicMarket/ into the
+# ModernUO source tree. The path is a straight copy under Projects/UOContent/
+# (an SDK-style csproj compiles any .cs file under its own directory by
+# default, same as CustomBots), so no .csproj edit and no core-file edit is
+# needed for it to build.
+# ---------------------------------------------------------------------------
+install_organicmarket() {
+  banner "Installing Organic Market admin tool"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/OrganicMarket"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/OrganicMarket/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/OrganicMarket"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Organic Market source unchanged. Skipping deploy."
+    return
+  fi
+
+  # Sync, not just copy-additive: a file removed/renamed on the source
+  # side (e.g. a class replaced by a new one) has to disappear from the
+  # deployed copy too, or the stale copy keeps compiling alongside its
+  # replacement - which either duplicates a type or, worse, still calls
+  # an old method signature that no longer exists.
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Organic Market source changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Organic Market admin tool deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
 # Lifecycle: install
 # ---------------------------------------------------------------------------
 do_install() {
@@ -1318,6 +1449,7 @@ do_install() {
   bootstrap_dotnet
   apply_engine_patches
   install_playerbots
+  install_organicmarket
   install_map_editor
   build_modernuo
   fix_felucca_season
@@ -1364,6 +1496,7 @@ do_update() {
   bootstrap_dotnet
   apply_engine_patches
   install_playerbots
+  install_organicmarket
 
   say "Forcing a rebuild against the updated source..."
   rm -f "${DIST_DIR}/ModernUO.dll"
@@ -1381,6 +1514,12 @@ do_update() {
     ok "Restored Saves/ (world state and accounts untouched)."
   fi
   rmdir "${backup_dir}" 2>/dev/null || rm -rf "${backup_dir}"
+
+  # Fills in modernuo.json/expansion.json/FeatureFlags/flags.json only if
+  # one is actually missing (never true after a normal restore above) -
+  # a safety net against a config directory that never had all three to
+  # begin with, not a way around the "never clobber hand edits" promise.
+  ensure_modernuo_config
 
   fetch_spawn_map
   install_runtime_scripts

@@ -1,0 +1,243 @@
+diff --git a/Projects/UOContent/Items/Armor/BaseArmor.cs b/Projects/UOContent/Items/Armor/BaseArmor.cs
+index f4062326d..b94200559 100644
+--- a/Projects/UOContent/Items/Armor/BaseArmor.cs
++++ b/Projects/UOContent/Items/Armor/BaseArmor.cs
+@@ -1389,6 +1389,24 @@ public override void OnSingleClick(Mobile from)
+             from.NetState.SendDisplayEquipmentInfo(Serial, number, _crafter, false, attrs);
+         }
+ 
++        // Localization.GetText(LabelNumber) returns null whenever the server has
++        // no cliloc data for that number - missing cliloc.enu, a language it
++        // doesn't cover, or a number outside the loaded set. Falling back to the
++        // tiledata name (backed by tiledata.mul, always present - it's one of
++        // the files ModernUO refuses to start without) keeps every single-click
++        // fallback on a real, always-available string instead of crashing.
++        private string SafeLabelText()
++        {
++            var text = Localization.GetText(LabelNumber);
++            if (!string.IsNullOrEmpty(text))
++            {
++                return text;
++            }
++
++            var tileName = TileData.ItemTable[ItemID].Name;
++            return !string.IsNullOrEmpty(tileName) ? tileName : GetType().Name;
++        }
++
+         public void OnSingleClickPreUOTD(Mobile from)
+         {
+             var isMagicItem = _durability != ArmorDurabilityLevel.Regular ||
+@@ -1396,7 +1414,7 @@ public void OnSingleClickPreUOTD(Mobile from)
+ 
+             if (isMagicItem && !_identified)
+             {
+-                LabelTo(from, $"an unidentified {Name ?? Localization.GetText(LabelNumber).ToLowerInvariant()}");
++                LabelTo(from, $"an unidentified {Name ?? SafeLabelText().ToLowerInvariant()}");
+                 return;
+             }
+ 
+@@ -1415,7 +1433,7 @@ public void OnSingleClickPreUOTD(Mobile from)
+ 
+                 if (name == null)
+                 {
+-                    builder.AppendSpaceWithArticle(Localization.GetText(LabelNumber).ToLowerInvariant(), articleAnName);
++                    builder.AppendSpaceWithArticle(SafeLabelText().ToLowerInvariant(), articleAnName);
+                 }
+                 else if (builder.Length != 0)
+                 {
+@@ -1437,7 +1455,7 @@ public void OnSingleClickPreUOTD(Mobile from)
+                 return;
+             }
+ 
+-            name ??= $"{(articleAnName ? "an" : "a")} {Localization.GetText(LabelNumber).ToLowerInvariant()}";
++            name ??= $"{(articleAnName ? "an" : "a")} {SafeLabelText().ToLowerInvariant()}";
+ 
+             if (Crafter == null)
+             {
+diff --git a/Projects/UOContent/Items/Clothing/BaseClothing.cs b/Projects/UOContent/Items/Clothing/BaseClothing.cs
+index 983568d2d..052adbac1 100644
+--- a/Projects/UOContent/Items/Clothing/BaseClothing.cs
++++ b/Projects/UOContent/Items/Clothing/BaseClothing.cs
+@@ -796,6 +796,24 @@ public override void OnSingleClick(Mobile from)
+             from.NetState.SendDisplayEquipmentInfo(Serial, number, _crafter, false, attrs);
+         }
+ 
++        // Localization.GetText(LabelNumber) returns null whenever the server has
++        // no cliloc data for that number - missing cliloc.enu, a language it
++        // doesn't cover, or a number outside the loaded set. Falling back to the
++        // tiledata name (backed by tiledata.mul, always present - it's one of
++        // the files ModernUO refuses to start without) keeps every single-click
++        // fallback on a real, always-available string instead of crashing.
++        private string SafeLabelText()
++        {
++            var text = Localization.GetText(LabelNumber);
++            if (!string.IsNullOrEmpty(text))
++            {
++                return text;
++            }
++
++            var tileName = TileData.ItemTable[ItemID].Name;
++            return !string.IsNullOrEmpty(tileName) ? tileName : GetType().Name;
++        }
++
+         public void OnSingleClickPreUOTD(Mobile from)
+         {
+             var name = Name;
+@@ -803,7 +821,7 @@ public void OnSingleClickPreUOTD(Mobile from)
+             if (name == null)
+             {
+                 var articleAnName = (TileData.ItemTable[ItemID].Flags & TileFlag.ArticleAn) != 0;
+-                name = $"{(articleAnName ? "an" : "a")} {Localization.GetText(LabelNumber).ToLowerInvariant()}";
++                name = $"{(articleAnName ? "an" : "a")} {SafeLabelText().ToLowerInvariant()}";
+             }
+ 
+             if (Crafter == null)
+diff --git a/Projects/UOContent/Items/Jewels/BaseJewel.cs b/Projects/UOContent/Items/Jewels/BaseJewel.cs
+index e693c0aaa..7db0aa708 100644
+--- a/Projects/UOContent/Items/Jewels/BaseJewel.cs
++++ b/Projects/UOContent/Items/Jewels/BaseJewel.cs
+@@ -223,6 +223,24 @@ public override void OnSingleClick(Mobile from)
+         base.OnSingleClick(from);
+     }
+ 
++    // Localization.GetText(LabelNumber) returns null whenever the server has
++    // no cliloc data for that number - missing cliloc.enu, a language it
++    // doesn't cover, or a number outside the loaded set. Falling back to the
++    // tiledata name (backed by tiledata.mul, always present - it's one of
++    // the files ModernUO refuses to start without) keeps every single-click
++    // fallback on a real, always-available string instead of crashing.
++    private string SafeLabelText()
++    {
++        var text = Localization.GetText(LabelNumber);
++        if (!string.IsNullOrEmpty(text))
++        {
++            return text;
++        }
++
++        var tileName = TileData.ItemTable[ItemID].Name;
++        return !string.IsNullOrEmpty(tileName) ? tileName : GetType().Name;
++    }
++
+     public virtual void OnSingleClickPreUOTD(Mobile from)
+     {
+         var plural = _gemCount > 1;
+@@ -238,7 +256,7 @@ public virtual void OnSingleClickPreUOTD(Mobile from)
+             if (name == null)
+             {
+                 var articleAnName = (TileData.ItemTable[ItemID].Flags & TileFlag.ArticleAn) != 0;
+-                name = $"{(articleAnName ? "an" : "a")} {Localization.GetText(LabelNumber).ToLowerInvariant()}";
++                name = $"{(articleAnName ? "an" : "a")} {SafeLabelText().ToLowerInvariant()}";
+             }
+         }
+ 
+diff --git a/Projects/UOContent/Items/Wands/BaseWand.cs b/Projects/UOContent/Items/Wands/BaseWand.cs
+index 8b0098275..127a3309e 100644
+--- a/Projects/UOContent/Items/Wands/BaseWand.cs
++++ b/Projects/UOContent/Items/Wands/BaseWand.cs
+@@ -238,6 +238,26 @@ public override void OnSingleClick(Mobile from)
+         from.NetState.SendDisplayEquipmentInfo(Serial, number, Crafter, false, attrs);
+     }
+ 
++    // Localization.GetText(LabelNumber) returns null whenever the server has
++    // no cliloc data for that number - missing cliloc.enu, a language it
++    // doesn't cover, or a number outside the loaded set. Falling back to the
++    // tiledata name (backed by tiledata.mul, always present - it's one of
++    // the files ModernUO refuses to start without) keeps every single-click
++    // fallback on a real, always-available string instead of crashing.
++    // Protected so subclasses that replace OnSingleClickPreUOTD outright
++    // (e.g. FireworksWand) can reuse it too.
++    protected string SafeLabelText()
++    {
++        var text = Localization.GetText(LabelNumber);
++        if (!string.IsNullOrEmpty(text))
++        {
++            return text;
++        }
++
++        var tileName = TileData.ItemTable[ItemID].Name;
++        return !string.IsNullOrEmpty(tileName) ? tileName : GetType().Name;
++    }
++
+     public void OnSingleClickPreUOTD(Mobile from)
+     {
+         var isMagicItem = _charges > 0;
+@@ -245,7 +265,7 @@ public void OnSingleClickPreUOTD(Mobile from)
+         if (name == null)
+         {
+             var articleAnName = (TileData.ItemTable[ItemID].Flags & TileFlag.ArticleAn) != 0;
+-            name = $"{(articleAnName ? "an" : "a")} {Localization.GetText(LabelNumber).ToLowerInvariant()}";
++            name = $"{(articleAnName ? "an" : "a")} {SafeLabelText().ToLowerInvariant()}";
+         }
+ 
+         if (isMagicItem && !Identified)
+diff --git a/Projects/UOContent/Items/Weapons/BaseWeapon.cs b/Projects/UOContent/Items/Weapons/BaseWeapon.cs
+index d48824670..e1a333f6d 100644
+--- a/Projects/UOContent/Items/Weapons/BaseWeapon.cs
++++ b/Projects/UOContent/Items/Weapons/BaseWeapon.cs
+@@ -3227,6 +3227,26 @@ public override void OnSingleClick(Mobile from)
+         from.NetState.SendDisplayEquipmentInfo(Serial, number, _crafter, false, attrs);
+     }
+ 
++    // Localization.GetText(LabelNumber) returns null whenever the server has
++    // no cliloc data for that number - missing cliloc.enu, a language it
++    // doesn't cover, or a number outside the loaded set. Falling back to the
++    // tiledata name (backed by tiledata.mul, always present - it's one of
++    // the files ModernUO refuses to start without) keeps every single-click
++    // fallback on a real, always-available string instead of crashing.
++    // Protected, not private: FireworksWand (Items/Weapons/Maces/) overrides
++    // this class's OnSingleClickPreUOTD outright and reuses this helper.
++    protected string SafeLabelText()
++    {
++        var text = Localization.GetText(LabelNumber);
++        if (!string.IsNullOrEmpty(text))
++        {
++            return text;
++        }
++
++        var tileName = TileData.ItemTable[ItemID].Name;
++        return !string.IsNullOrEmpty(tileName) ? tileName : GetType().Name;
++    }
++
+     public virtual void OnSingleClickPreUOTD(Mobile from)
+     {
+         var isMagicItem = _durabilityLevel > WeaponDurabilityLevel.Regular ||
+@@ -3236,7 +3256,7 @@ public virtual void OnSingleClickPreUOTD(Mobile from)
+ 
+         if (isMagicItem && !_identified)
+         {
+-            LabelTo(from, $"an unidentified {Name ?? Localization.GetText(LabelNumber).ToLowerInvariant()}");
++            LabelTo(from, $"an unidentified {Name ?? SafeLabelText().ToLowerInvariant()}");
+             return;
+         }
+ 
+@@ -3267,7 +3287,7 @@ public virtual void OnSingleClickPreUOTD(Mobile from)
+ 
+             if (name == null)
+             {
+-                builder.AppendSpaceWithArticle(Localization.GetText(LabelNumber).ToLowerInvariant(), articleAnName);
++                builder.AppendSpaceWithArticle(SafeLabelText().ToLowerInvariant(), articleAnName);
+             }
+             else if (builder.Length != 0)
+             {
+@@ -3291,7 +3311,7 @@ public virtual void OnSingleClickPreUOTD(Mobile from)
+             return;
+         }
+ 
+-        name ??= $"{(articleAnName ? "an" : "a")} {Localization.GetText(LabelNumber).ToLowerInvariant()}";
++        name ??= $"{(articleAnName ? "an" : "a")} {SafeLabelText().ToLowerInvariant()}";
+ 
+         if (Crafter == null)
+         {
+diff --git a/Projects/UOContent/Items/Weapons/Maces/FireworksWand.cs b/Projects/UOContent/Items/Weapons/Maces/FireworksWand.cs
+index 7c0c64a61..3f5e1b901 100644
+--- a/Projects/UOContent/Items/Weapons/Maces/FireworksWand.cs
++++ b/Projects/UOContent/Items/Weapons/Maces/FireworksWand.cs
+@@ -101,7 +101,7 @@ private static void FinishLaunch(Point3D endLoc, Map map)
+ 
+         public override void OnSingleClickPreUOTD(Mobile from)
+         {
+-            LabelTo(from, Name ?? Localization.GetText(LabelNumber).ToLowerInvariant());
++            LabelTo(from, Name ?? SafeLabelText().ToLowerInvariant());
+         }
+     }
+ }
