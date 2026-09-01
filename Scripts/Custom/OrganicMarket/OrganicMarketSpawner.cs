@@ -8,6 +8,7 @@
 // change if a new style or archetype gets added later.
 // =========================================================================
 
+using System;
 using System.Collections.Generic;
 using Server;
 using Server.Items;
@@ -24,6 +25,13 @@ public static class OrganicMarketSpawner
     // (Mobiles/Vendors/PlayerVendor.cs) never trips, so a market vendor
     // never decays or dismisses itself for lack of funds.
     public const int VendorCommissionCeiling = 1_000_000_000;
+
+    // The exact archetype string PlaceHouse's ambient branch registers -
+    // shared so OrganicMarketDirectoryGump's row rendering (hide Restock/
+    // Move Vendor for these) and anything else that needs to tell an
+    // ambient residence apart from a vendor shop compare against the one
+    // literal instead of risking a second copy drifting out of sync.
+    public const string AmbientResidenceArchetype = "Ambient Residence";
 
     public static string StyleName(MarketHouseStyle style) => style switch
     {
@@ -48,17 +56,84 @@ public static class OrganicMarketSpawner
         MarketHouseStyle.LargeTower              => "Tower",
         MarketHouseStyle.Keep                    => "Keep",
         MarketHouseStyle.Castle                  => "Castle",
+        MarketHouseStyle.StoneWorkshop           => "Stone Workshop",
+        MarketHouseStyle.MarbleWorkshop          => "Marble Workshop",
+        MarketHouseStyle.ThreeRoomBrickHouse     => "Three Room Brick House",
         _                                         => style.ToString()
     };
 
     public static string ArchetypeName(MarketArchetype archetype) => archetype switch
     {
-        MarketArchetype.Blacksmith    => "Blacksmith",
-        MarketArchetype.MageAlchemist => "Mage/Alchemist",
-        MarketArchetype.CurioRares    => "Curio/Rares",
-        MarketArchetype.TailorFletcher => "Tailor/Fletcher",
-        _                              => archetype.ToString()
+        MarketArchetype.BlacksmithArmory  => "Blacksmith Armory",
+        MarketArchetype.MageApothecary    => "Mage Apothecary",
+        MarketArchetype.ScribeLibrary     => "Scribe Library",
+        MarketArchetype.RawResources      => "Raw Resources",
+        MarketArchetype.TailorFletcher    => "Tailor/Fletcher",
+        MarketArchetype.TinkerCarpenter   => "Tinker & Carpenter",
+        MarketArchetype.FisherCurioBaker  => "Fisher/Curio/Baker",
+        _                                  => archetype.ToString()
     };
+
+    // SP-030: the reverse of ArchetypeName - MerchantGuildAuthority's
+    // registry only stores the friendly display string per house slot
+    // (Register's own `string archetype` param), so a dynamic restock
+    // that needs the real enum back (to re-run StockTemplateEngine.
+    // StockVendor) has to parse it back out. Returns null for
+    // AmbientResidenceArchetype (a filler house, not a shop) or anything
+    // else that doesn't match a live archetype name.
+    public static MarketArchetype? ArchetypeFromName(string name) => name switch
+    {
+        "Blacksmith Armory"  => MarketArchetype.BlacksmithArmory,
+        "Mage Apothecary"    => MarketArchetype.MageApothecary,
+        "Scribe Library"     => MarketArchetype.ScribeLibrary,
+        "Raw Resources"      => MarketArchetype.RawResources,
+        "Tailor/Fletcher"    => MarketArchetype.TailorFletcher,
+        "Tinker & Carpenter" => MarketArchetype.TinkerCarpenter,
+        "Fisher/Curio/Baker" => MarketArchetype.FisherCurioBaker,
+        _                     => null
+    };
+
+    // SP-026: official OSI base deed valuation for each style, used only
+    // for GetPurchasePrice below and for display on AmbientHousePurchaseGump
+    // - never fed into HousePlacement.Check or anything placement-related.
+    // Aliased enum entries that share one real multi ID (SandStonePatio/
+    // SandstoneHouseWithPatio, LogCabin/TwoStoryLogCabin, SmallShop/
+    // StoneWorkshop, ...) intentionally share the same price here too,
+    // since they're the same real house under two names.
+    public static int GetBaseDeedPrice(MarketHouseStyle style) => style switch
+    {
+        MarketHouseStyle.StoneAndPlasterHouse    => 37_000,
+        MarketHouseStyle.FieldStoneHouse         => 37_000,
+        MarketHouseStyle.SmallStoneHouse         => 37_000, // alias of FieldStoneHouse - same multi ID
+        MarketHouseStyle.SmallBrickHouse         => 36_750,
+        MarketHouseStyle.SmallWoodHouse          => 35_250, // "Wooden House"
+        MarketHouseStyle.WoodAndPlasterHouse     => 36_750,
+        MarketHouseStyle.SmallPlasterHouse       => 36_750, // "Thatched Roof Cottage" - same multi ID
+        MarketHouseStyle.SmallShop               => 50_500, // "Stone Workshop" - same multi ID
+        MarketHouseStyle.StoneWorkshop           => 50_500,
+        MarketHouseStyle.MarbleWorkshop          => 52_500,
+        MarketHouseStyle.SmallTower              => 73_500, // "Small Stone Tower"
+        MarketHouseStyle.SandStonePatio          => 76_500,
+        MarketHouseStyle.SandstoneHouseWithPatio => 76_500, // alias - same multi ID
+        MarketHouseStyle.LogCabin                => 81_750,
+        MarketHouseStyle.TwoStoryLogCabin        => 81_750, // alias - same multi ID
+        MarketHouseStyle.TwoStoryVilla           => 113_750, // "Villa"
+        MarketHouseStyle.LargePatio              => 129_250, // "Large House with Patio"
+        MarketHouseStyle.ThreeRoomBrickHouse     => 131_500, // "Brick House"
+        MarketHouseStyle.MarbleHouseWithPatio    => 160_500,
+        MarketHouseStyle.TwoStoryStoneAndPlaster => 162_000,
+        MarketHouseStyle.TwoStoryWoodPlaster     => 162_750, // "Two-Story Wood and Plaster House"
+        MarketHouseStyle.LargeTower              => 366_500, // "Tower"
+        MarketHouseStyle.Keep                    => 572_750, // "Small Stone Keep"
+        MarketHouseStyle.Castle                  => 865_250,
+        _                                          => 0
+    };
+
+    // (basePrice * 1.10) rounded to the nearest thousand - the task's own
+    // formula. Rounds, not truncates, so a base price already a clean
+    // multiple of ~909 doesn't consistently round down.
+    public static int GetPurchasePrice(MarketHouseStyle style) =>
+        (int)(Math.Round(GetBaseDeedPrice(style) * 1.10 / 1000.0) * 1000);
 
     // The real house multi ID and deed placement offset for each style —
     // same values the stock house deeds use (Multis/Deeds.cs), so the
@@ -109,6 +184,16 @@ public static class OrganicMarketSpawner
         MarketHouseStyle.LargeTower              => 0x7A, // TowerDeed
         MarketHouseStyle.Keep                    => 0x7C, // KeepDeed
         MarketHouseStyle.Castle                  => 0x7E, // CastleDeed
+        // SP-026: StoneWorkshopDeed's own real multi ID (Multis/Deeds.cs)
+        // IS 0xA0 - the exact same art SmallShop above already uses. Not a
+        // bug: "Small Shop" and "Stone Workshop" are two names for the
+        // same OSI house art, kept as two separate enum entries (like
+        // SandStonePatio/SandstoneHouseWithPatio and LogCabin/
+        // TwoStoryLogCabin above) rather than renaming SmallShop out from
+        // under every place that already depends on that exact name.
+        MarketHouseStyle.StoneWorkshop           => 0xA0, // StoneWorkshopDeed
+        MarketHouseStyle.MarbleWorkshop          => 0xA2, // MarbleWorkshopDeed - genuinely distinct art
+        MarketHouseStyle.ThreeRoomBrickHouse     => 0x74, // BrickHouseDeed -> GuildHouse
         _                                          => 0xA0
     };
 
@@ -137,6 +222,9 @@ public static class OrganicMarketSpawner
         MarketHouseStyle.LargeTower              => new Point3D(0, 7, 0),
         MarketHouseStyle.Keep                    => new Point3D(0, 11, 0),
         MarketHouseStyle.Castle                  => new Point3D(0, 16, 0),
+        MarketHouseStyle.StoneWorkshop           => new Point3D(-1, 4, 0),
+        MarketHouseStyle.MarbleWorkshop          => new Point3D(-1, 4, 0),
+        MarketHouseStyle.ThreeRoomBrickHouse     => new Point3D(-1, 7, 0),
         _                                          => Point3D.Zero
     };
 
@@ -230,7 +318,33 @@ public static class OrganicMarketSpawner
             // merchant's craft station, and no PlayerVendor at all.
             house.Public = false;
             DynamicClutterGenerator.FurnishResidential(house, authority);
-            authority.Register(house, "Ambient Residence", null);
+            authority.Register(house, AmbientResidenceArchetype, null);
+
+            // SP-026: swap the stock sign BaseHouse's own constructor
+            // already built for one that knows this house's style and
+            // intercepts a player's double-click with a purchase offer
+            // (AmbientHouseSign) - same location/map the original sign
+            // landed at (SetSign's own per-style offset, already baked
+            // into house.Sign.Location by the time BuildHouse returns), so
+            // this is purely a behavior swap, not a visual one.
+            //
+            // Internalize, NEVER Delete, the old sign here - HouseSign.
+            // OnAfterDelete cascades into deleting its own Owner (Multis/
+            // Houses/HouseSign.cs: "if (Owner?.Deleted == false)
+            // Owner.Delete();" - a real house sign and its house are
+            // inseparable by design), so Delete()'ing the stock sign this
+            // house was just built with would immediately delete the house
+            // this method just built it for. Internalize (MoveToWorld to
+            // Map.Internal, the same parking spot MerchantGuildAuthority
+            // itself lives at) makes it invisible and inert without ever
+            // running that cascade.
+            var oldSign = house.Sign;
+            var signLoc = oldSign?.Location ?? new Point3D(house.X, house.Y - 1, house.Z);
+            oldSign?.Internalize();
+
+            var forSaleSign = new AmbientHouseSign(house, style);
+            forSaleSign.MoveToWorld(signLoc, map);
+            house.Sign = forSaleSign;
         }
 
         return authority.Count - 1;
@@ -405,6 +519,9 @@ public static class OrganicMarketSpawner
         MarketHouseStyle.LargeTower              => new Tower(owner),
         MarketHouseStyle.Keep                    => new Keep(owner),
         MarketHouseStyle.Castle                  => new Castle(owner),
+        MarketHouseStyle.StoneWorkshop           => new SmallShop(owner, 0xA0),
+        MarketHouseStyle.MarbleWorkshop          => new SmallShop(owner, 0xA2),
+        MarketHouseStyle.ThreeRoomBrickHouse     => new GuildHouse(owner),
         _                                          => null
     };
 
@@ -435,6 +552,7 @@ public static class OrganicMarketSpawner
         MarketHouseStyle.LargeTower              => 4,
         MarketHouseStyle.Keep                    => 4,
         MarketHouseStyle.Castle                  => 4,
+        MarketHouseStyle.ThreeRoomBrickHouse     => 3,
         _                                          => 2
     };
 
@@ -461,20 +579,25 @@ public static class OrganicMarketSpawner
             var loc = house.Sign?.Location ?? new Point3D(house.X, house.Y - 1, house.Z);
             var faceTarget = InteriorTileFinder.FrontDoorLocation(house) ?? house.BanLocation;
             var facing = InteriorTileFinder.DirectionTo(loc, faceTarget);
-            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing));
+            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, 0));
             return vendors;
         }
 
+        // SP-028: index threaded through to StockTemplateEngine.StockVendor
+        // as this vendor's own tier - see that file's header note on why a
+        // multi-vendor shop stocks three distinct tiers instead of the
+        // same items four times over.
+        var index = 0;
         foreach (var (loc, facing) in spots)
         {
-            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing));
+            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, index++));
         }
 
         return vendors;
     }
 
     private static PlayerVendor SpawnOneVendor(
-        Mobile authority, BaseHouse house, MarketArchetype archetype, Point3D loc, Direction facing
+        Mobile authority, BaseHouse house, MarketArchetype archetype, Point3D loc, Direction facing, int vendorIndex
     )
     {
         var vendor = new PlayerVendor(authority, house)
@@ -500,7 +623,7 @@ public static class OrganicMarketSpawner
         // its shirt or boots.
         NameWornApparel(vendor);
 
-        StockTemplateEngine.StockVendor(vendor, archetype);
+        StockTemplateEngine.StockVendor(vendor, archetype, vendorIndex);
 
         return vendor;
     }

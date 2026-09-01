@@ -76,7 +76,13 @@ public class OrganicMarketDirectoryGump : DynamicGump
             20, 16, width - 40, 20,
             $"<center><basefont color=#FFD700>Market House Directory — page {page + 1}/{pageCount}</basefont></center>"
         );
-        builder.AddHtml(20, 38, width - 40, 20, "<basefont color=#7FFFD4>ID   Archetype           Facet      X, Y, Z</basefont>");
+        // SP-028: column widened for the archetype catalog's longer
+        // friendly names ("Blacksmith Armory", "Scribe Library") -
+        // OrganicMarketSpawner.ArchetypeName already produces the display
+        // string this shows, stored verbatim at registration time
+        // (MerchantGuildAuthority.ArchetypeAt), so there's nothing else to
+        // reformat here beyond making sure the column is wide enough.
+        builder.AddHtml(20, 38, width - 40, 20, "<basefont color=#7FFFD4>ID   Archetype             Facet      X, Y, Z</basefont>");
 
         if (total == 0)
         {
@@ -96,19 +102,35 @@ public class OrganicMarketDirectoryGump : DynamicGump
             var facet = alive ? house.Map?.ToString() ?? "?" : "(gone)";
             var loc = alive ? house.Location : Point3D.Zero;
 
-            builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-18} {facet,-9} {loc.X},{loc.Y},{loc.Z}");
+            builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-20} {facet,-9} {loc.X},{loc.Y},{loc.Z}");
 
             builder.AddButton(ColTeleport, buttonY, 4005, 4007, TeleportBase + i);
             builder.AddLabel(ColTeleport + 24, buttonY, 0x59, "Teleport");
 
-            builder.AddButton(ColRestock, buttonY, 4005, 4007, RestockBase + i);
-            builder.AddLabel(ColRestock + 24, buttonY, 0x44, "Restock");
+            // SP-026: an ambient residence has no vendor to restock or
+            // move - those two columns would either be dead buttons or
+            // (worse) silently act on whatever leftover _vendors[i] slot
+            // happens to sit there. Delete moves up into Restock's own
+            // column instead of staying pinned at the far-right Delete
+            // slot, so the row reads as two buttons sitting cleanly next
+            // to each other rather than two buttons with a wide gap where
+            // Restock/Move Vendor would have been.
+            if (archetype == OrganicMarketSpawner.AmbientResidenceArchetype)
+            {
+                builder.AddButton(ColRestock, buttonY, 4017, 4019, DeleteBase + i);
+                builder.AddLabel(ColRestock + 24, buttonY, 0x25, "Delete");
+            }
+            else
+            {
+                builder.AddButton(ColRestock, buttonY, 4005, 4007, RestockBase + i);
+                builder.AddLabel(ColRestock + 24, buttonY, 0x44, "Restock");
 
-            builder.AddButton(ColMoveVendor, buttonY, 4005, 4007, MoveVendorBase + i);
-            builder.AddLabel(ColMoveVendor + 24, buttonY, 0x59, "Move Vendor");
+                builder.AddButton(ColMoveVendor, buttonY, 4005, 4007, MoveVendorBase + i);
+                builder.AddLabel(ColMoveVendor + 24, buttonY, 0x59, "Move Vendor");
 
-            builder.AddButton(ColDelete, buttonY, 4017, 4019, DeleteBase + i);
-            builder.AddLabel(ColDelete + 24, buttonY, 0x25, "Delete");
+                builder.AddButton(ColDelete, buttonY, 4017, 4019, DeleteBase + i);
+                builder.AddLabel(ColDelete + 24, buttonY, 0x25, "Delete");
+            }
         }
 
         // Anchored together in the bottom-right region rather than

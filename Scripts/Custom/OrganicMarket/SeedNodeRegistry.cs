@@ -50,7 +50,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
-            MarketArchetype.Blacksmith
+            MarketArchetype.BlacksmithArmory
         ),
 
         // North of Britain, toward the Shrine of Compassion.
@@ -60,7 +60,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
-            MarketArchetype.MageAlchemist
+            MarketArchetype.MageApothecary
         ),
 
         // East out of Britain on the bridge road toward Cove and, beyond
@@ -71,7 +71,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.LargePatio,
-            MarketArchetype.CurioRares
+            MarketArchetype.ScribeLibrary
         ),
 
         // South of Britain on the coast road down toward Trinsic.
@@ -81,7 +81,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.SandStonePatio,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.RawResources
         ),
 
         // Paws, the small farming village between Britain and Yew.
@@ -91,7 +91,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
-            MarketArchetype.Blacksmith
+            MarketArchetype.TailorFletcher
         ),
 
         // The court road running into Yew proper.
@@ -101,7 +101,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
-            MarketArchetype.MageAlchemist
+            MarketArchetype.TinkerCarpenter
         ),
 
         // Forest junction near Empath Abbey, west of Yew.
@@ -111,7 +111,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.SmallShop,
-            MarketArchetype.CurioRares
+            MarketArchetype.BlacksmithArmory
         ),
 
         // Mainland side of the Skara Brae ferry crossing.
@@ -130,7 +130,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.MageApothecary
         ),
 
         // Southern road junction near the hedge maze, between Britain and
@@ -141,7 +141,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.LargePatio,
-            MarketArchetype.Blacksmith
+            MarketArchetype.ScribeLibrary
         ),
 
         // North of Trinsic (bank ~1899,2688) on the road running up
@@ -152,7 +152,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             45,
             MarketHouseStyle.SandStonePatio,
-            MarketArchetype.MageAlchemist
+            MarketArchetype.RawResources
         ),
 
         // West of Trinsic, on the paladin road out past the guard gate.
@@ -162,7 +162,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
-            MarketArchetype.CurioRares
+            MarketArchetype.TailorFletcher
         ),
 
         // Farmland crossroads on Jhelom's main island.
@@ -172,7 +172,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.TinkerCarpenter
         ),
 
         // South-west of the direct Vesper-Minoc line (which runs over the
@@ -184,7 +184,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             45,
             MarketHouseStyle.LargePatio,
-            MarketArchetype.Blacksmith
+            MarketArchetype.BlacksmithArmory
         ),
 
         // The mountain pass road into Minoc - kept to the smallest style,
@@ -195,7 +195,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.SmallShop,
-            MarketArchetype.MageAlchemist
+            MarketArchetype.MageApothecary
         ),
 
         // West of Cove, on the road toward Britain.
@@ -205,7 +205,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.TwoStoryWoodPlaster,
-            MarketArchetype.CurioRares
+            MarketArchetype.ScribeLibrary
         ),
 
         // Border crossing on the arid stretch between Britain and Vesper,
@@ -216,7 +216,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.SandStonePatio,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.RawResources
         ),
 
         // Outside Moonglow's own guard-zone perimeter (bank ~4471,1157) -
@@ -229,7 +229,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
-            MarketArchetype.Blacksmith
+            MarketArchetype.TailorFletcher
         ),
 
         // The road to the Lycaeum, also on Moonglow's small island - same
@@ -240,7 +240,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             45,
             MarketHouseStyle.SmallShop,
-            MarketArchetype.MageAlchemist
+            MarketArchetype.TinkerCarpenter
         ),
 
         // Northern outskirts of Ocllo, the island Magincia sits on.
@@ -250,7 +250,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.StoneAndPlasterHouse,
-            MarketArchetype.CurioRares
+            MarketArchetype.FisherCurioBaker
         ),
 
         // SP-029: was "Nujel'm Mainland Trade Port Road" at (3200,1100) -
@@ -269,7 +269,7 @@ public static class SeedNodeRegistry
             Map.Felucca,
             50,
             MarketHouseStyle.LogCabin,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.FisherCurioBaker
         )
     };
 
@@ -449,21 +449,43 @@ public static class SeedNodeRegistry
             ("Delucia Forest Hamlet", 1400, 3700)
         };
 
-        // Cycled round-robin across all 32 nodes purely for visual variety
-        // - no thematic tie between a given POI and the style/archetype it
+        // Cycled round-robin across all nodes purely for visual variety -
+        // no thematic tie between a given POI and the style/archetype it
         // lands on.
+        //
+        // SP-026: expanded from 11 to every genuinely distinct house art
+        // OrganicMarketSpawner.BuildHouse supports, so ambient filler draws
+        // across the full 20-style catalog task SP-026 completed rather
+        // than the original small sample. Deliberately still ONE entry per
+        // real multi ID, not one per MarketHouseStyle name - several enum
+        // values are pure naming aliases for art already listed here
+        // (StoneWorkshop/SmallShop, FieldStoneHouse/SmallStoneHouse,
+        // TwoStoryLogCabin/LogCabin, SandstoneHouseWithPatio/SandStonePatio)
+        // and including both sides of an alias would just double that one
+        // art's odds instead of adding real variety. LargeTower/Keep/Castle
+        // stay out of this rotation entirely - see WorldHouseSeeder.
+        // RollFillerStyle's own separate low-probability roll.
         var styles = new[]
         {
             MarketHouseStyle.SmallShop, MarketHouseStyle.SmallPlasterHouse, MarketHouseStyle.SmallStoneHouse,
             MarketHouseStyle.SmallWoodHouse, MarketHouseStyle.WoodAndPlasterHouse, MarketHouseStyle.StoneAndPlasterHouse,
-            MarketHouseStyle.TwoStoryWoodPlaster, MarketHouseStyle.LargePatio, MarketHouseStyle.SandStonePatio,
-            MarketHouseStyle.LogCabin, MarketHouseStyle.SmallTower
+            MarketHouseStyle.SmallBrickHouse, MarketHouseStyle.TwoStoryWoodPlaster, MarketHouseStyle.TwoStoryStoneAndPlaster,
+            MarketHouseStyle.LargePatio, MarketHouseStyle.MarbleHouseWithPatio, MarketHouseStyle.SmallTower,
+            MarketHouseStyle.LogCabin, MarketHouseStyle.SandStonePatio, MarketHouseStyle.TwoStoryVilla,
+            MarketHouseStyle.MarbleWorkshop, MarketHouseStyle.ThreeRoomBrickHouse
         };
 
+        // SP-028: expanded from 4 to all 6 archetypes so ambient-filler
+        // vendor rolls (WorldHouseSeeder.SeedInhabitation's ~10% vendor
+        // chance) rotate evenly across the full catalog too, not just the
+        // original four.
+        // SP-029: expanded from 6 to all 7 archetypes, including the new
+        // FisherCurioBaker.
         var archetypes = new[]
         {
-            MarketArchetype.Blacksmith, MarketArchetype.MageAlchemist, MarketArchetype.CurioRares,
-            MarketArchetype.TailorFletcher
+            MarketArchetype.BlacksmithArmory, MarketArchetype.MageApothecary, MarketArchetype.ScribeLibrary,
+            MarketArchetype.RawResources, MarketArchetype.TailorFletcher, MarketArchetype.TinkerCarpenter,
+            MarketArchetype.FisherCurioBaker
         };
 
         var nodes = new SeedNode[raw.Length];

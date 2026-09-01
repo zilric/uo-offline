@@ -20,7 +20,7 @@ public class OrganicMarketAdminGump : DynamicGump
     private const int ArchetypeGroup = 1;
 
     private const int SwitchStyleBase = 0;      // 0..2
-    private const int SwitchArchetypeBase = 10; // 10..13
+    private const int SwitchArchetypeBase = 10; // 10..16
 
     private const int ButtonPlace = 1;
     private const int ButtonDirectory = 2;
@@ -38,10 +38,13 @@ public class OrganicMarketAdminGump : DynamicGump
 
     private static readonly MarketArchetype[] Archetypes =
     {
-        MarketArchetype.Blacksmith,
-        MarketArchetype.MageAlchemist,
-        MarketArchetype.CurioRares,
-        MarketArchetype.TailorFletcher
+        MarketArchetype.BlacksmithArmory,
+        MarketArchetype.MageApothecary,
+        MarketArchetype.ScribeLibrary,
+        MarketArchetype.RawResources,
+        MarketArchetype.TailorFletcher,
+        MarketArchetype.TinkerCarpenter,
+        MarketArchetype.FisherCurioBaker
     };
 
     private OrganicMarketAdminGump() : base(50, 50)
@@ -66,8 +69,16 @@ public class OrganicMarketAdminGump : DynamicGump
         // past the point a flat +100px would have covered, so this goes a
         // bit further than that to actually land clipping-free rather than
         // stop at a number that still clips by a few pixels.
+        //
+        // SP-028: +48px on top of that for the archetype catalog's growth
+        // from 4 to 6 radios (afterArch below already scales with
+        // Archetypes.Length automatically - only this fixed canvas height
+        // needs a matching manual bump, or the wipe button at the bottom
+        // clips past the background).
+        //
+        // SP-029: +24px more for the 7th archetype (FisherCurioBaker).
         const int width = 380;
-        const int height = 610;
+        const int height = 682;
         const int radioRowHeight = 24;
 
         builder.AddPage();

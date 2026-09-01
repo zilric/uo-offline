@@ -61,15 +61,48 @@ public enum MarketHouseStyle
     // low-probability roll rather than part of the normal rotation.
     LargeTower,
     Keep,
-    Castle
+    Castle,
+
+    // SP-026: rounds the catalog out to every real classic-house deed
+    // ModernUO ships that this list didn't already cover under a
+    // different name - see OrganicMarketSpawner.MultiId/BuildHouse for
+    // exactly which multi ID/class each maps to, and OrganicMarketSpawner.
+    // GetBaseDeedPrice for why several existing entries above (SmallShop,
+    // SandStonePatio/SandstoneHouseWithPatio, LogCabin/TwoStoryLogCabin,
+    // SmallPlasterHouse, ...) already ARE one of the task's requested 20
+    // names under an alias this codebase settled on earlier and isn't
+    // worth renaming out from under every place that already references
+    // it (VendorCountFor, InhabitationNodes' round-robin, ...).
+    StoneWorkshop,
+    MarbleWorkshop,
+    ThreeRoomBrickHouse
 }
 
+// SP-028: expanded from 4 to 6 distinct commercial themes, and renamed
+// three of the original four to match this ticket's own naming
+// (Blacksmith -> BlacksmithArmory, MageAlchemist -> MageApothecary,
+// CurioRares -> TinkerCurio - its old curio/treasure-map stock folds into
+// TinkerCurio's own broader "rarities" remit) rather than adding six more
+// values alongside four that would otherwise sit unused. TailorFletcher
+// keeps its exact name since the ticket reuses it unchanged. See
+// StockTemplateEngine for each archetype's actual stock list and
+// DynamicClutterGenerator for its themed interior fixtures.
+//
+// SP-029: TinkerCurio -> TinkerCarpenter (its remit narrows to hardware/
+// carpentry - furniture, tinker tools, addon deeds; see StockTemplateEngine
+// for exactly what moved) now that TinkerCurio's old curio/rarity side has
+// its own dedicated home in the new 7th archetype, FisherCurioBaker -
+// deep-sea fishing, tavern food, treasure hunting, and curio antiquarian
+// stock that didn't fit anywhere else in the catalog.
 public enum MarketArchetype
 {
-    Blacksmith,
-    MageAlchemist,
-    CurioRares,
-    TailorFletcher
+    BlacksmithArmory,
+    MageApothecary,
+    ScribeLibrary,
+    RawResources,
+    TailorFletcher,
+    TinkerCarpenter,
+    FisherCurioBaker
 }
 
 [SerializationGenerator(0, false)]
@@ -315,40 +348,97 @@ public partial class MerchantGuildAuthority : Mobile
         }
     }
 
+    // SP-030: clears only a vendor's own for-sale stock (its Backpack's
+    // contents) - unlike ClearVendorInventory above, this leaves the
+    // vendor's worn outfit and bank box alone, since a restock replaces
+    // what's for sale, not the vendor itself.
+    private static void ClearVendorStock(PlayerVendor vendor)
+    {
+        if (vendor.Backpack is { Deleted: false } backpack)
+        {
+            DeleteAllItems(backpack.Items);
+        }
+    }
+
     // "Restock" for a PlayerVendor — there's no SBInfo stock to
     // regenerate (that's a BaseVendor-only concept; PlayerVendor sells
-    // whatever's actually been dropped on it and priced) — means
-    // replenishing its commission back to the ceiling, undoing whatever
-    // the daily PayTimer upkeep has chipped off. See
-    // OrganicMarketSpawner.VendorCommissionCeiling.
+    // whatever's actually been dropped on it and priced). SP-030: now
+    // does two things per shop house - replenishes every one of its
+    // vendors' commission back to the ceiling (undoing whatever the daily
+    // PayTimer upkeep has chipped off, see OrganicMarketSpawner.
+    // VendorCommissionCeiling), AND wipes + re-runs StockTemplateEngine
+    // against every one of its vendors, which is what actually makes the
+    // Carpenter/Scribe/Tinker archetypes' dynamic rotation pools
+    // (StockTemplateEngine.CarpenterFurniturePool/ScribeCombatScrollPool/
+    // TinkerGadgetPool) reroll on each restock instead of only at initial
+    // spawn.
+    //
+    // house.PlayerVendors (not the single tracked "primary" _vendors[i])
+    // is what's walked here - same reasoning as DeleteAt's teardown pass:
+    // a shop has 2-4 real vendors (OrganicMarketSpawner.VendorCountFor),
+    // and this registry's own parallel lists only ever tracked one. Each
+    // vendor's own position in that list is its "Vendor 1..4" slot, since
+    // PlayerVendor.OnHouseChanged appends to it in the exact order
+    // SpawnVendors originally constructed them in - see
+    // OrganicMarketSpawner.SpawnVendors' own vendorIndex loop.
+    private int RestockHouseVendors(int i)
+    {
+        var house = _houses[i];
+        if (house?.Deleted != false)
+        {
+            return 0;
+        }
+
+        var archetype = OrganicMarketSpawner.ArchetypeFromName(_archetypes[i]);
+        var count = 0;
+
+        if (archetype is { } a)
+        {
+            var vendorIndex = 0;
+            foreach (var v in house.PlayerVendors)
+            {
+                if (v is { Deleted: false })
+                {
+                    ClearVendorStock(v);
+                    StockTemplateEngine.StockVendor(v, a, vendorIndex);
+                    v.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
+                    v.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
+                    count++;
+                }
+
+                vendorIndex++;
+            }
+        }
+        else if (_vendors[i] is PlayerVendor { Deleted: false } vendor)
+        {
+            // Ambient residence slot (no archetype - nothing to restock),
+            // or a legacy/unparsed archetype string - just keep the
+            // original gold-refill behavior on whatever's tracked as this
+            // slot's "primary."
+            vendor.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
+            vendor.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
+            count++;
+        }
+
+        return count;
+    }
+
     public bool RestockAt(int i)
     {
-        if (i < 0 || i >= _vendors.Count)
+        if (i < 0 || i >= _houses.Count)
         {
             return false;
         }
 
-        if (_vendors[i] is PlayerVendor { Deleted: false } vendor)
-        {
-            vendor.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
-            vendor.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
-            return true;
-        }
-
-        return false;
+        return RestockHouseVendors(i) > 0;
     }
 
     public int RestockAll()
     {
         var count = 0;
-        foreach (var vendor in _vendors)
+        for (var i = 0; i < _houses.Count; i++)
         {
-            if (vendor is PlayerVendor { Deleted: false } pv)
-            {
-                pv.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
-                pv.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
-                count++;
-            }
+            count += RestockHouseVendors(i);
         }
 
         return count;
@@ -366,6 +456,36 @@ public partial class MerchantGuildAuthority : Mobile
         }
 
         return count;
+    }
+
+    // SP-026: pulls a house's slot out of the registry WITHOUT touching the
+    // house, its vendor, or anything locked down inside it - the opposite
+    // of DeleteAt, which exists specifically for the moment a player
+    // actually buys an ambient filler house (AmbientHousePurchaseGump).
+    // From that point on the house is real, player-owned property; leaving
+    // it in this registry would mean the next [Wipe All Market Houses]
+    // deletes a home someone paid for. Index lookup by reference (rather
+    // than requiring the caller to already know its slot) since the only
+    // caller is the purchase flow, which only has the BaseHouse itself in
+    // hand.
+    // Cheap pre-purchase check (AmbientHousePurchaseGump) - confirms the
+    // house is still a live registry entry before any gold changes hands,
+    // so a stale gump (the house got deleted or bought out from under the
+    // player between opening the gump and clicking Buy) fails cleanly
+    // instead of debiting a player for a house that's no longer theirs to
+    // buy.
+    public bool IsRegistered(BaseHouse house) => house != null && _houses.Contains(house);
+
+    public bool Deregister(BaseHouse house)
+    {
+        var index = _houses.IndexOf(house);
+        if (index < 0)
+        {
+            return false;
+        }
+
+        RemoveEntryAt(index);
+        return true;
     }
 
     private void RemoveEntryAt(int i)
