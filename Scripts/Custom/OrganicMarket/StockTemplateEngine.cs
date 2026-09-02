@@ -547,11 +547,12 @@ public static class StockTemplateEngine
                     );
                 }
 
-                // 8 single-reagent sub-pouches, each holding 3-4 duplicate
-                // 100-stacks of that one reagent - priced at a conceptual
-                // NPC base (4gp/reagent, in line with a T2A reagent
-                // shop's own per-piece price) +15%, times how many
-                // 100-stacks this particular pouch got.
+                // SP-031: 8 single-reagent DISPLAY pouches, each holding 3-4
+                // duplicate 100-stacks of that one reagent individually
+                // priced at a conceptual NPC base (4gp/reagent, in line with
+                // a T2A reagent shop's own per-piece price) +15% - a player
+                // can now open the pouch and buy just one 100-stack instead
+                // of the whole pouch as one lot.
                 AddReagentPouch(vendor, "Black Pearl Pouch", () => new BlackPearl());
                 AddReagentPouch(vendor, "Bloodmoss Pouch", () => new Bloodmoss());
                 AddReagentPouch(vendor, "Garlic Pouch", () => new Garlic());
@@ -646,15 +647,21 @@ public static class StockTemplateEngine
     // declaration, not one made zero-argument-callable by a default
     // value) - confirmed by the compiler rejecting every reagent type
     // here with CS0310 on the first build attempt.
+    //
+    // SP-031: the pouch is now a DISPLAY container (CreateDisplayContainer,
+    // Price = -1) instead of a priced bundle - each 100-stack inside gets
+    // its own individual price via AddDisplayItem, so a player can open
+    // the pouch and buy just one stack rather than the whole pouch as a
+    // single lot.
     private static void AddReagentPouch(PlayerVendor vendor, string name, Func<Item> factory)
     {
         var stackCount = Utility.RandomMinMax(3, 4);
         var per100Price = (int)Math.Round(100 * ReagentNpcBasePerPiece * 1.15);
-        var pouch = CreatePackagedSubcontainer<Pouch>(vendor, name, 0x48E, per100Price * stackCount);
+        var pouch = CreateDisplayContainer<Pouch>(vendor, name, 0x48E);
 
         for (var i = 0; i < stackCount; i++)
         {
-            pouch.DropItem(Stack(factory(), 100));
+            AddDisplayItem(vendor, pouch, Stack(factory(), 100), per100Price);
         }
     }
 
@@ -677,6 +684,92 @@ public static class StockTemplateEngine
         (() => new EnergyBoltScroll(), "an energy bolt scroll", 4300),
         (() => new FlamestrikeScroll(), "a flamestrike scroll", 5100)
     };
+
+    // SP-031: real destination data for the Navigator's pre-marked
+    // runebooks (see CreateMarkedRunebook) - City/Bank and Dungeon
+    // coordinates are the sprint ticket's own list; Shrine (Ilshenar) and
+    // Moongate (Felucca) coordinates are ModernUO's own canonical values,
+    // copied from Items/Misc/PublicMoongate.cs's PMList.Ilshenar/Felucca
+    // static data (the same coordinates the real shrines/moongates use) -
+    // 8 shrines + 8 moongates fills the 16-rune capacity exactly, the same
+    // way the 16 cities and 10 dungeons below do for their own books.
+    private static readonly (int X, int Y, int Z, Map Map, string Desc)[] CitiesAndBanksRunes =
+    {
+        (1434, 1699, 2, Map.Felucca, "Britain (1st Bank)"),
+        (1417, 1686, 10, Map.Felucca, "Britain (West Bank)"),
+        (4407, 1169, 0, Map.Felucca, "Moonglow"),
+        (546, 992, 0, Map.Felucca, "Yew"),
+        (596, 2138, 0, Map.Felucca, "Skara Brae"),
+        (1823, 2821, 0, Map.Felucca, "Trinsic"),
+        (2477, 407, 15, Map.Felucca, "Minoc"),
+        (2899, 676, 0, Map.Felucca, "Vesper"),
+        (1378, 3817, 0, Map.Felucca, "Jhelom"),
+        (2238, 1214, 0, Map.Felucca, "Cove"),
+        (3650, 2519, 0, Map.Felucca, "Ocllo"),
+        (3760, 1301, 0, Map.Felucca, "Nujel'm"),
+        (3734, 2163, 20, Map.Felucca, "Magincia"),
+        (2711, 2234, 0, Map.Felucca, "Buccaneer's Den"),
+        (5272, 3995, 37, Map.Felucca, "Delucia"),
+        (5672, 3144, 12, Map.Felucca, "Papua")
+    };
+
+    private static readonly (int X, int Y, int Z, Map Map, string Desc)[] DungeonRunes =
+    {
+        (2498, 921, 0, Map.Felucca, "Covetous"),
+        (4111, 434, 5, Map.Felucca, "Deceit"),
+        (1301, 1080, 0, Map.Felucca, "Despise"),
+        (1176, 2640, 2, Map.Felucca, "Destard"),
+        (4721, 3824, 0, Map.Felucca, "Hythloth"),
+        (514, 1561, 5, Map.Felucca, "Shame"),
+        (2043, 238, 10, Map.Felucca, "Wrong"),
+        (2923, 3407, 8, Map.Felucca, "Fire"),
+        (1999, 81, 4, Map.Felucca, "Ice"),
+        (1020, 1432, 0, Map.Felucca, "Orc Cave")
+    };
+
+    private static readonly (int X, int Y, int Z, Map Map, string Desc)[] ShrinesAndMoongatesRunes =
+    {
+        (1215, 467, -13, Map.Ilshenar, "Shrine of Compassion"),
+        (722, 1366, -60, Map.Ilshenar, "Shrine of Honesty"),
+        (744, 724, -28, Map.Ilshenar, "Shrine of Honor"),
+        (281, 1016, 0, Map.Ilshenar, "Shrine of Humility"),
+        (987, 1011, -32, Map.Ilshenar, "Shrine of Justice"),
+        (1174, 1286, -30, Map.Ilshenar, "Shrine of Sacrifice"),
+        (1532, 1340, -3, Map.Ilshenar, "Shrine of Spirituality"),
+        (528, 216, -45, Map.Ilshenar, "Shrine of Valor"),
+        (4467, 1283, 5, Map.Felucca, "Moongate: Moonglow"),
+        (1336, 1997, 5, Map.Felucca, "Moongate: Britain"),
+        (1499, 3771, 5, Map.Felucca, "Moongate: Jhelom"),
+        (771, 752, 5, Map.Felucca, "Moongate: Yew"),
+        (2701, 692, 5, Map.Felucca, "Moongate: Minoc"),
+        (1828, 2948, -20, Map.Felucca, "Moongate: Trinsic"),
+        (643, 2067, 5, Map.Felucca, "Moongate: Skara Brae"),
+        (3563, 2139, 5, Map.Felucca, "Moongate: Magincia")
+    };
+
+    // SP-031: builds a real pre-marked, charged runebook - unlike the old
+    // flavor-only `Runebook(16)` (which actually set MaxCharges = 16 and
+    // left Entries/CurCharges empty, since Runebook's own constructor
+    // param IS maxCharges, not an entry count), this adds actual
+    // RunebookEntry rows to Entries (a private-setter property, but the
+    // List instance itself is freely mutable - same approach Runebook's
+    // own OnDragDrop uses to add a dropped rune) and charges the book so
+    // its recall is castable immediately, matching the checklist's "active
+    // recall charges ready for immediate casting."
+    private static Runebook CreateMarkedRunebook(
+        string name, string description, (int X, int Y, int Z, Map Map, string Desc)[] destinations
+    )
+    {
+        var book = new Runebook(20) { Name = name, Description = description };
+        book.CurCharges = book.MaxCharges;
+
+        foreach (var (x, y, z, map, desc) in destinations)
+        {
+            book.Entries.Add(new RunebookEntry(book, new Point3D(x, y, z), map, desc));
+        }
+
+        return book;
+    }
 
     private static void StockScribeLibrary(PlayerVendor vendor, int slot)
     {
@@ -727,17 +820,26 @@ public static class StockTemplateEngine
                 }
                 break;
 
-            case 2: // The Navigator - pre-marked 16-rune runebooks
-                var cities = Named(new Runebook(16), "Britannia Cities & Banks Runebook");
-                cities.Description = "Pre-marked with recall runes to every major city bank.";
+            case 2: // The Navigator - SP-031: real pre-marked, charged runebooks (16/10/16 active runes)
+                var cities = CreateMarkedRunebook(
+                    "Runebook: Britannia Cities & Banks",
+                    "Pre-marked with 16 active recall runes to every major city bank.",
+                    CitiesAndBanksRunes
+                );
                 SellLoose(vendor, cities, 3500);
 
-                var dungeons = Named(new Runebook(16), "Dungeon Entrances Runebook");
-                dungeons.Description = "Pre-marked with recall runes to every classic dungeon entrance.";
+                var dungeons = CreateMarkedRunebook(
+                    "Runebook: Dungeons of Britannia",
+                    "Pre-marked with 10 active recall runes to Britannia's classic dungeons.",
+                    DungeonRunes
+                );
                 SellLoose(vendor, dungeons, 4000);
 
-                var shrines = Named(new Runebook(16), "Shrines & Moongates Runebook");
-                shrines.Description = "Pre-marked with recall runes to every virtue shrine and public moongate.";
+                var shrines = CreateMarkedRunebook(
+                    "Runebook: Shrines & Moongates",
+                    "Pre-marked with 16 active recall runes to every virtue shrine and public moongate.",
+                    ShrinesAndMoongatesRunes
+                );
                 SellLoose(vendor, shrines, 3000);
                 break;
 
@@ -760,30 +862,59 @@ public static class StockTemplateEngine
     {
         switch (slot)
         {
-            case 0: // Lumberjack
-                SellLoose(vendor, Stack(new Log(), 125), 250);
-                SellLoose(vendor, Stack(new Board(), 125), 375);
-                SellLoose(vendor, Stack(new Shaft(), 250), 500);
+            case 0: // Lumberjack - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
+                var timber = CreateDisplayContainer<WoodenBox>(vendor, "Timber Organizer", 0);
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, timber, Stack(new Log(), 125), 250);
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, timber, Stack(new Board(), 125), 375);
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, timber, Stack(new Shaft(), 250), 500);
+                }
                 break;
 
-            case 1: // Smelter & Miner
-                // SP-030: economy rebalance - Iron Ingot 7-9gp/unit (150 stack = 1,050-1,350gp).
-                SellLoose(vendor, Stack(new IronIngot(), 150), Utility.RandomMinMax(1050, 1350));
-                SellLoose(vendor, Stack(new Granite(), 100), 300);
+            case 1: // Smelter & Miner - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
+                var smelter = CreateDisplayContainer<WoodenBox>(vendor, "Smelter Organizer", 0);
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    // SP-030: economy rebalance - Iron Ingot 7-9gp/unit (150 stack = 1,050-1,350gp).
+                    AddDisplayItem(vendor, smelter, Stack(new IronIngot(), 150), Utility.RandomMinMax(1050, 1350));
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, smelter, Stack(new Granite(), 100), 300);
+                }
+
                 // "3x GM Pickaxes" per the ticket - Pickaxe : BaseAxe :
                 // BaseWeapon (a mining tool that's mechanically an axe),
                 // so "GM" means the same WeaponQuality.Exceptional every
-                // other GM piece in this file gets.
+                // other GM piece in this file gets. Sold loose, not in the
+                // organizer - a one-off tool, not a duplicate resource stack.
                 for (var i = 0; i < 3; i++)
                 {
                     AddGMItem(vendor, new Pickaxe(), "a pickaxe", 35);
                 }
                 break;
 
-            case 2: // Tanner & Weaver
-                SellLoose(vendor, Stack(new Cloth(), 100), 300);
-                SellLoose(vendor, Stack(new Leather(), 100), 400);
-                SellLoose(vendor, Stack(new SpinedLeather(), 100), 500);
+            case 2: // Tanner & Weaver - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
+                var tannery = CreateDisplayContainer<WoodenBox>(vendor, "Tannery Organizer", 0);
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, tannery, Stack(new Cloth(), 100), 300);
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, tannery, Stack(new Leather(), 100), 400);
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    AddDisplayItem(vendor, tannery, Stack(new SpinedLeather(), 100), 500);
+                }
                 break;
 
             default: // Specialty - Colored Ingot Organizer (SP-030: DISPLAY container, unit-scale pricing)
@@ -821,20 +952,27 @@ public static class StockTemplateEngine
     private const string MasterBowyerName = "a Master Bowyer";
     private const string MasterTailorName = "a Master Tailor";
 
+    // SP-031: classic palette hues - real hue table entries, unlike the
+    // 0x0/0x481 values this replaced (0x0 is "no hue" - it renders an
+    // item's native color, not black; 0x481 is one index off the real
+    // Ice White).
+    private const int PureBlackHue = 0x0455;
+    private const int IceWhiteHue = 0x0480;
+
     private static void StockTailorFletcher(PlayerVendor vendor, int slot)
     {
         switch (slot)
         {
-            case 0: // Bowyer / Fletcher
-                for (var i = 0; i < 3; i++)
+            case 0: // Bowyer / Fletcher - SP-031: duplicate GM bow/crossbow sets, 3-4 parallel ammo stacks
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
                 {
                     AddGMItem(vendor, new Bow(), "a bow", 190, MasterBowyerName);
                 }
-                for (var i = 0; i < 3; i++)
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
                 {
                     AddGMItem(vendor, new HeavyCrossbow(), "a heavy crossbow", 260, MasterBowyerName);
                 }
-                for (var i = 0; i < 2; i++)
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
                 {
                     AddGMItem(vendor, new Crossbow(), "a crossbow", 200, MasterBowyerName);
                 }
@@ -843,8 +981,16 @@ public static class StockTemplateEngine
                     AddGMItem(vendor, new CompositeBow(), "a composite bow", 210, MasterBowyerName);
                 }
 
-                SellLoose(vendor, Stack(new Arrow(), 500), 400);
-                SellLoose(vendor, Stack(new Bolt(), 500), 450);
+                // Authentic market rate: ~4-5gp/shaft -> 2,000-2,500gp per
+                // 500-count stack, 3-4 parallel stacks of each ammo type.
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    SellLoose(vendor, Stack(new Arrow(), 500), Utility.RandomMinMax(2000, 2500));
+                }
+                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                {
+                    SellLoose(vendor, Stack(new Bolt(), 500), Utility.RandomMinMax(2000, 2500));
+                }
                 break;
 
             case 1: // Leather Specialist
@@ -893,19 +1039,27 @@ public static class StockTemplateEngine
                 SellLoose(vendor, Named(new Boots { Hue = Utility.RandomList(0x489, 0x21, 0x59) }, "dyed footwear"));
                 break;
 
-            default: // Specialty - Rare Hued Garb
+            default: // Specialty - Rare Hued Garb (SP-031: real classic palette hues, full garment set)
                 PackAndPriceSuit(
-                    vendor, "Pure Black Clothing Set", 0x0, 1600,
-                    Named(new Robe { Hue = 0x0 }, "a robe"),
-                    Named(new Cloak { Hue = 0x0 }, "a cloak"),
-                    Named(new Boots { Hue = 0x0 }, "a pair of boots")
+                    vendor, "Pure Black Clothing Set", PureBlackHue, 2200,
+                    Named(new FancyShirt { Hue = PureBlackHue }, "a fancy shirt"),
+                    Named(new Doublet { Hue = PureBlackHue }, "a doublet"),
+                    Named(new Cloak { Hue = PureBlackHue }, "a cloak"),
+                    Named(new Skirt { Hue = PureBlackHue }, "a layered skirt"),
+                    Named(new Kilt { Hue = PureBlackHue }, "a kilt"),
+                    Named(new Robe { Hue = PureBlackHue }, "a robe"),
+                    Named(new ThighBoots { Hue = PureBlackHue }, "a pair of thigh boots")
                 );
 
                 PackAndPriceSuit(
-                    vendor, "Ice White Clothing Set", 0x481, 1600,
-                    Named(new Robe { Hue = 0x481 }, "a robe"),
-                    Named(new Cloak { Hue = 0x481 }, "a cloak"),
-                    Named(new Boots { Hue = 0x481 }, "a pair of boots")
+                    vendor, "Ice White Clothing Set", IceWhiteHue, 2200,
+                    Named(new FancyShirt { Hue = IceWhiteHue }, "a fancy shirt"),
+                    Named(new Doublet { Hue = IceWhiteHue }, "a doublet"),
+                    Named(new Cloak { Hue = IceWhiteHue }, "a cloak"),
+                    Named(new Skirt { Hue = IceWhiteHue }, "a layered skirt"),
+                    Named(new Kilt { Hue = IceWhiteHue }, "a kilt"),
+                    Named(new Robe { Hue = IceWhiteHue }, "a robe"),
+                    Named(new ThighBoots { Hue = IceWhiteHue }, "a pair of thigh boots")
                 );
 
                 // Special Dye Tub - restocked rarely (a plain DyeTub is
