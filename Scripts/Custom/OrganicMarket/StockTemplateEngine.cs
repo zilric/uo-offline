@@ -39,12 +39,17 @@ using System;
 using System.Collections.Generic;
 using Server;
 using Server.Items;
+using Server.Logging;
 using Server.Mobiles;
 
 namespace Server.Engines.OrganicMarket;
 
 public static class StockTemplateEngine
 {
+    // SP-032: gated behind VerboseConfig.VendorStock - see StockVendor and
+    // SellLoose below for what actually logs.
+    private static readonly ILogger logger = LogFactory.GetLogger(typeof(StockTemplateEngine));
+
     // ---- Price Dictionary ----------------------------------------------
     // Baseline gold prices for every loose good this engine generates that
     // isn't already priced inline at its own call site (a themed
@@ -96,6 +101,11 @@ public static class StockTemplateEngine
         if (vi != null)
         {
             vi.Price = priceOverride ?? BasePrices.GetValueOrDefault(item.GetType(), 100);
+
+            if (VerboseConfig.VendorStock)
+            {
+                logger.Information("SellLoose: priced {Item} at {Price}gp for {Vendor}", item.GetType().Name, vi.Price, vendor.Serial);
+            }
         }
     }
 
@@ -355,6 +365,11 @@ public static class StockTemplateEngine
         }
 
         var slot = vendorIndex % 4;
+
+        if (VerboseConfig.VendorStock)
+        {
+            logger.Information("StockVendor: populating {Vendor} as {Archetype} slot {Slot}", vendor.Serial, archetype, slot);
+        }
 
         switch (archetype)
         {
@@ -862,58 +877,70 @@ public static class StockTemplateEngine
     {
         switch (slot)
         {
-            case 0: // Lumberjack - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
-                var timber = CreateDisplayContainer<WoodenBox>(vendor, "Timber Organizer", 0);
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+            case 0: // Lumberjack - SP-033: parallel single-commodity DISPLAY organizers, not one
+                    // combined box - a Timber Crate (Log/Board) sits beside its own Shaft Bundle,
+                    // 2-3 duplicate stacks per commodity, directly in the root backpack.
+                var timber = CreateDisplayContainer<WoodenBox>(vendor, "Timber Crate", 0);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
                     AddDisplayItem(vendor, timber, Stack(new Log(), 125), 250);
                 }
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
                     AddDisplayItem(vendor, timber, Stack(new Board(), 125), 375);
                 }
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+
+                var shafts = CreateDisplayContainer<Basket>(vendor, "Shaft Bundle", 0);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
-                    AddDisplayItem(vendor, timber, Stack(new Shaft(), 250), 500);
+                    AddDisplayItem(vendor, shafts, Stack(new Shaft(), 250), 500);
                 }
                 break;
 
-            case 1: // Smelter & Miner - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
-                var smelter = CreateDisplayContainer<WoodenBox>(vendor, "Smelter Organizer", 0);
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+            case 1: // Smelter & Miner - SP-033: an Ingot Box beside its own Quarry Crate, not one
+                    // combined organizer.
+                var ingotBox = CreateDisplayContainer<WoodenBox>(vendor, "Ingot Box", 0);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
                     // SP-030: economy rebalance - Iron Ingot 7-9gp/unit (150 stack = 1,050-1,350gp).
-                    AddDisplayItem(vendor, smelter, Stack(new IronIngot(), 150), Utility.RandomMinMax(1050, 1350));
+                    AddDisplayItem(vendor, ingotBox, Stack(new IronIngot(), 150), Utility.RandomMinMax(1050, 1350));
                 }
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+
+                var quarryCrate = CreateDisplayContainer<WoodenBox>(vendor, "Quarry Crate", 0);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
-                    AddDisplayItem(vendor, smelter, Stack(new Granite(), 100), 300);
+                    AddDisplayItem(vendor, quarryCrate, Stack(new Granite(), 100), 300);
                 }
 
                 // "3x GM Pickaxes" per the ticket - Pickaxe : BaseAxe :
                 // BaseWeapon (a mining tool that's mechanically an axe),
                 // so "GM" means the same WeaponQuality.Exceptional every
-                // other GM piece in this file gets. Sold loose, not in the
-                // organizer - a one-off tool, not a duplicate resource stack.
+                // other GM piece in this file gets. Sold loose, not in
+                // either organizer - a one-off tool upgrade, not a
+                // duplicate resource stack (SP-033's own "leave high-value
+                // single items loose... for immediate visual pop").
                 for (var i = 0; i < 3; i++)
                 {
                     AddGMItem(vendor, new Pickaxe(), "a pickaxe", 35);
                 }
                 break;
 
-            case 2: // Tanner & Weaver - SP-031: DISPLAY organizer, 3-4 duplicate stacks per commodity
-                var tannery = CreateDisplayContainer<WoodenBox>(vendor, "Tannery Organizer", 0);
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+            case 2: // Tanner & Weaver - SP-033: a Leather Bag (hides) beside its own Cloth Bundle,
+                    // not one combined organizer.
+                var leatherBag = CreateDisplayContainer<Bag>(vendor, "Leather Bag", 0x455);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
-                    AddDisplayItem(vendor, tannery, Stack(new Cloth(), 100), 300);
+                    AddDisplayItem(vendor, leatherBag, Stack(new Leather(), 100), 400);
                 }
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
-                    AddDisplayItem(vendor, tannery, Stack(new Leather(), 100), 400);
+                    AddDisplayItem(vendor, leatherBag, Stack(new SpinedLeather(), 100), 500);
                 }
-                for (var i = Utility.RandomMinMax(3, 4); i > 0; i--)
+
+                var clothBundle = CreateDisplayContainer<Bag>(vendor, "Cloth Bundle", 0x47E);
+                for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
-                    AddDisplayItem(vendor, tannery, Stack(new SpinedLeather(), 100), 500);
+                    AddDisplayItem(vendor, clothBundle, Stack(new Cloth(), 100), 300);
                 }
                 break;
 
@@ -1230,4 +1257,296 @@ public static class StockTemplateEngine
                 break;
         }
     }
+
+    // ==== Vendor Theming (SP-033/SP-034) ======================================
+    //
+    // Called once per spawn, after StockVendor - sets an overhead trade
+    // title (Mobile.Title, renders as "Name the Title") and swaps in
+    // themed apparel on top of whatever PlayerVendor.InitOutfit already
+    // equipped. Every layer this touches is cleared first
+    // (FindItemOnLayer(...)?.Delete()) rather than relying on AddItem to
+    // resolve a same-layer conflict on its own - InitOutfit's own base
+    // outfit (FancyShirt/LongPants/BodySash/Boots/Cloak) already occupies
+    // several of the layers a themed piece needs.
+    //
+    // SP-034: keyed on (archetype, slot) instead of archetype alone - a
+    // shop's own Vendor 1..4 sell genuinely different things (StockVendor's
+    // own per-slot switch), so "the Weaponsmith" standing at the Shield
+    // Specialist's counter read as wrong. slot = vendorIndex % 4, the same
+    // wrap StockVendor itself uses, so slot 3 (and any overflow past 4 on
+    // an odd house style) always lands on each archetype's own default/
+    // "Specialty" title.
+    //
+    // Deliberately visual-only: no Say/PublicOverheadMessage/SayTo call
+    // anywhere here or anywhere else this touches - vendors stay
+    // completely silent beyond whatever reactive shop dialogue
+    // PlayerVendor's own core transaction handling already speaks (out of
+    // scope to touch - that's Mobiles/Vendors/PlayerVendor.cs, not this
+    // directory).
+    public static void ApplyVendorTheme(PlayerVendor vendor, MarketArchetype archetype, int vendorIndex)
+    {
+        if (vendor == null)
+        {
+            return;
+        }
+
+        var slot = vendorIndex % 4;
+
+        var (apparel, title) = (archetype, slot) switch
+        {
+            (MarketArchetype.BlacksmithArmory, 0) => (BlacksmithWeaponsmithApparel(), "the Weaponsmith"),
+            (MarketArchetype.BlacksmithArmory, 1) => (BlacksmithArmorerApparel(), "the Armorer"),
+            (MarketArchetype.BlacksmithArmory, 2) => (BlacksmithShieldcrafterApparel(), "the Shieldcrafter"),
+            (MarketArchetype.BlacksmithArmory, _) => (BlacksmithSlayerCollectorApparel(), "the Slayer Collector"),
+
+            (MarketArchetype.MageApothecary, 0) => (MageHerbalistApparel(), "the Herbalist"),
+            (MarketArchetype.MageApothecary, 1) => (MagePotionBrewerApparel(), "the Potion Brewer"),
+            (MarketArchetype.MageApothecary, 2) => (MageMasterBrewerApparel(), "the Master Brewer"),
+            (MarketArchetype.MageApothecary, _) => (MageWandMerchantApparel(), "the Wand Merchant"),
+
+            (MarketArchetype.ScribeLibrary, 0) => (ScribeScrollMerchantApparel(), "the Scroll Merchant"),
+            (MarketArchetype.ScribeLibrary, 1) => (ScribeLibrarianApparel(), "the Librarian"),
+            (MarketArchetype.ScribeLibrary, 2) => (ScribeNavigatorApparel(), "the Navigator"),
+            (MarketArchetype.ScribeLibrary, _) => (ScribeAntiquarianApparel(), "the Antiquarian"),
+
+            (MarketArchetype.RawResources, 0) => (ResourcesLumberjackApparel(), "the Lumberjack"),
+            (MarketArchetype.RawResources, 1) => (ResourcesMinerApparel(), "the Miner"),
+            (MarketArchetype.RawResources, 2) => (ResourcesTannerApparel(), "the Tanner & Weaver"),
+            (MarketArchetype.RawResources, _) => (ResourcesExoticOreApparel(), "the Exotic Ore Merchant"),
+
+            (MarketArchetype.TailorFletcher, 0) => (TailorBowyerApparel(), "the Bowyer & Fletcher"),
+            (MarketArchetype.TailorFletcher, 1) => (TailorLeatherworkerApparel(), "the Leatherworker"),
+            (MarketArchetype.TailorFletcher, 2) => (TailorClothierApparel(), "the Clothier"),
+            (MarketArchetype.TailorFletcher, _) => (TailorMasterDyerApparel(), "the Master Dyer"),
+
+            (MarketArchetype.TinkerCarpenter, 0) => (TinkerCarpenterSlotApparel(), "the Carpenter"),
+            (MarketArchetype.TinkerCarpenter, 1) => (TinkerTinkererApparel(), "the Tinkerer"),
+            (MarketArchetype.TinkerCarpenter, 2) => (TinkerArtisanApparel(), "the Artisan"),
+            (MarketArchetype.TinkerCarpenter, _) => (TinkerAddonArchitectApparel(), "the Addon Architect"),
+
+            (MarketArchetype.FisherCurioBaker, 0) => (FisherDeepSeaApparel(), "the Deep Sea Fisherman"),
+            (MarketArchetype.FisherCurioBaker, 1) => (FisherTavernCookApparel(), "the Tavern Cook"),
+            (MarketArchetype.FisherCurioBaker, 2) => (FisherTreasureHunterApparel(), "the Treasure Hunter"),
+            (MarketArchetype.FisherCurioBaker, _) => (FisherCurioCollectorApparel(), "the Curio Collector"),
+
+            _ => (Array.Empty<Item>(), null)
+        };
+
+        vendor.Title = title;
+
+        foreach (var item in apparel)
+        {
+            vendor.FindItemOnLayer(item.Layer)?.Delete();
+            vendor.AddItem(item);
+        }
+    }
+
+    // A handful of tool classes (BaseTool subclasses that aren't also
+    // weapons, e.g. MortarPestle/TinkerTools) don't set their own hand
+    // Layer the way BaseWeapon/BaseArmor subclasses already do (both
+    // derive it from tiledata in their own base constructor - `Layer =
+    // (Layer)ItemData.Quality;` - so Hatchet/Pickaxe/Bow/HeaterShield/
+    // Buckler/Katana all equip correctly with zero extra work here). This
+    // forces a hand Layer on so a plain BaseTool prop actually equips
+    // instead of silently failing to render as held.
+    private static T Held<T>(T item) where T : Item
+    {
+        item.Layer = Layer.OneHanded;
+        return item;
+    }
+
+    // ---- BlacksmithArmory ---------------------------------------------------
+
+    private static Item[] BlacksmithWeaponsmithApparel() =>
+    [
+        new FullApron(),
+        Held(new SmithHammer()),
+        new RingmailLegs()
+    ];
+
+    private static Item[] BlacksmithArmorerApparel() =>
+    [
+        new FullApron(),
+        Held(new SmithHammer()),
+        new ChainCoif()
+    ];
+
+    private static Item[] BlacksmithShieldcrafterApparel() =>
+    [
+        new HalfApron(),
+        new HeaterShield()
+    ];
+
+    private static Item[] BlacksmithSlayerCollectorApparel() =>
+    [
+        new FullApron(),
+        new RingmailLegs(),
+        new Katana()
+    ];
+
+    // ---- MageApothecary ------------------------------------------------------
+
+    private static Item[] MageHerbalistApparel() =>
+    [
+        new Robe(),
+        Held(new MortarPestle())
+    ];
+
+    private static Item[] MagePotionBrewerApparel() =>
+    [
+        new Robe { Hue = 0x489 },
+        Held(new MortarPestle())
+    ];
+
+    private static Item[] MageMasterBrewerApparel() =>
+    [
+        new HalfApron(),
+        new Boots()
+    ];
+
+    private static Item[] MageWandMerchantApparel() =>
+    [
+        new Robe { Hue = 0x489 },
+        new WizardsHat { Hue = 0x489 },
+        new Spellbook(0)
+    ];
+
+    // ---- ScribeLibrary --------------------------------------------------------
+
+    private static Item[] ScribeScrollMerchantApparel() =>
+    [
+        new Robe(),
+        new Cloak()
+    ];
+
+    private static Item[] ScribeLibrarianApparel() =>
+    [
+        new Robe(),
+        new Cloak(),
+        new Spellbook(0)
+    ];
+
+    private static Item[] ScribeNavigatorApparel() =>
+    [
+        new Robe(),
+        new Cloak(),
+        new Runebook()
+    ];
+
+    private static Item[] ScribeAntiquarianApparel() =>
+    [
+        new Robe { Hue = 0x481 },
+        new Cloak { Hue = 0x481 }
+    ];
+
+    // ---- RawResources -----------------------------------------------------
+
+    private static Item[] ResourcesLumberjackApparel() =>
+    [
+        new HalfApron(),
+        new Shirt(),
+        new Boots(),
+        new Hatchet()
+    ];
+
+    private static Item[] ResourcesMinerApparel() =>
+    [
+        new HalfApron(),
+        new Shirt(),
+        new Boots(),
+        new Pickaxe()
+    ];
+
+    private static Item[] ResourcesTannerApparel() =>
+    [
+        new HalfApron(),
+        new Shirt(),
+        new Boots()
+    ];
+
+    private static Item[] ResourcesExoticOreApparel() =>
+    [
+        new FullApron(),
+        new Shirt(),
+        new Boots()
+    ];
+
+    // ---- TailorFletcher ------------------------------------------------------
+
+    private static Item[] TailorBowyerApparel() =>
+    [
+        new LeatherChest(),
+        new Bow(),
+        new FancyShirt()
+    ];
+
+    private static Item[] TailorLeatherworkerApparel() =>
+    [
+        new LeatherChest(),
+        new FancyShirt()
+    ];
+
+    private static Item[] TailorClothierApparel() =>
+    [
+        new FancyShirt(),
+        new Cloak()
+    ];
+
+    private static Item[] TailorMasterDyerApparel() =>
+    [
+        new Robe { Hue = 0x486 },
+        new Cloak { Hue = 0x486 }
+    ];
+
+    // ---- TinkerCarpenter -----------------------------------------------------
+
+    private static Item[] TinkerCarpenterSlotApparel() =>
+    [
+        new FullApron(),
+        Held(new SmithHammer())
+    ];
+
+    private static Item[] TinkerTinkererApparel() =>
+    [
+        new FullApron(),
+        Held(new TinkerTools())
+    ];
+
+    private static Item[] TinkerArtisanApparel() =>
+    [
+        new FullApron(),
+        Held(new TinkerTools())
+    ];
+
+    private static Item[] TinkerAddonArchitectApparel() =>
+    [
+        new FullApron(),
+        Held(new TinkerTools())
+    ];
+
+    // ---- FisherCurioBaker -----------------------------------------------------
+
+    private static Item[] FisherDeepSeaApparel() =>
+    [
+        new FloppyHat(),
+        new FishingPole()
+    ];
+
+    private static Item[] FisherTavernCookApparel() =>
+    [
+        new HalfApron(),
+        new Cap()
+    ];
+
+    private static Item[] FisherTreasureHunterApparel() =>
+    [
+        new Bandana(),
+        new Boots()
+    ];
+
+    private static Item[] FisherCurioCollectorApparel() =>
+    [
+        new FancyShirt(),
+        new Cloak { Hue = 0x489 }
+    ];
 }

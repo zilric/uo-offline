@@ -16,6 +16,7 @@
 using System.Collections.Generic;
 using ModernUO.Serialization;
 using Server;
+using Server.Logging;
 using Server.Mobiles;
 using Server.Multis;
 
@@ -108,6 +109,11 @@ public enum MarketArchetype
 [SerializationGenerator(0, false)]
 public partial class MerchantGuildAuthority : Mobile
 {
+    // SP-032: gated behind VerboseConfig.WorldHousing (DeleteAt's teardown
+    // sweep) and VerboseConfig.VendorStock (RestockHouseVendors' restock
+    // cycles) - see those methods below.
+    private static readonly ILogger logger = LogFactory.GetLogger(typeof(MerchantGuildAuthority));
+
     private static MerchantGuildAuthority _instance;
 
     public static MerchantGuildAuthority Instance => _instance;
@@ -237,6 +243,11 @@ public partial class MerchantGuildAuthority : Mobile
         var house = _houses[i];
         var vendor = _vendors[i];
 
+        if (VerboseConfig.WorldHousing)
+        {
+            logger.Information("DeleteAt: tearing down house slot {Slot} ({Archetype})", i, _archetypes[i]);
+        }
+
         if (house?.Deleted == false)
         {
             // Copy first — removing a vendor from house.PlayerVendors (the
@@ -295,6 +306,11 @@ public partial class MerchantGuildAuthority : Mobile
                         toDelete.Add(item);
                     }
                 }
+            }
+
+            if (VerboseConfig.WorldHousing)
+            {
+                logger.Information("DeleteAt: footprint sweep at house slot {Slot} clearing {Count} item(s)", i, toDelete.Count);
             }
 
             foreach (var item in toDelete)
@@ -394,6 +410,11 @@ public partial class MerchantGuildAuthority : Mobile
 
         if (archetype is { } a)
         {
+            if (VerboseConfig.VendorStock)
+            {
+                logger.Information("RestockHouseVendors: restock cycle starting for house slot {Slot} ({Archetype})", i, a);
+            }
+
             var vendorIndex = 0;
             foreach (var v in house.PlayerVendors)
             {
@@ -442,6 +463,53 @@ public partial class MerchantGuildAuthority : Mobile
         }
 
         return count;
+    }
+
+    // SP-033: restocks exactly ONE vendor rather than its whole house -
+    // the granularity MarketRestockManager's startup threshold check needs
+    // ("leave already stocked vendors intact" means a house's siblings
+    // shouldn't get wiped just because one of them came back empty).
+    // Looks up the vendor's own archetype (via its house's registry entry)
+    // and its slot index (its position in house.PlayerVendors - see
+    // RestockHouseVendors' own comment on why that position IS the
+    // vendor's "Vendor 1..4" role) rather than requiring the caller to
+    // already know either.
+    public bool RestockVendor(PlayerVendor vendor)
+    {
+        if (vendor?.Deleted != false || vendor.House is not { Deleted: false } house)
+        {
+            return false;
+        }
+
+        var houseIndex = _houses.IndexOf(house);
+        if (houseIndex < 0)
+        {
+            return false;
+        }
+
+        var archetype = OrganicMarketSpawner.ArchetypeFromName(_archetypes[houseIndex]);
+        if (archetype is not { } a)
+        {
+            return false;
+        }
+
+        var vendorIndex = house.PlayerVendors.IndexOf(vendor);
+        if (vendorIndex < 0)
+        {
+            return false;
+        }
+
+        ClearVendorStock(vendor);
+        StockTemplateEngine.StockVendor(vendor, a, vendorIndex);
+        vendor.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
+        vendor.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
+
+        if (VerboseConfig.VendorStock)
+        {
+            logger.Information("RestockVendor: filled under-stocked vendor {Vendor} ({Archetype} slot {Slot})", vendor.Serial, a, vendorIndex);
+        }
+
+        return true;
     }
 
     public int WipeAll()

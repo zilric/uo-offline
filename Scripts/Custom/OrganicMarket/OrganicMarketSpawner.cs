@@ -625,30 +625,78 @@ public static class OrganicMarketSpawner
 
         StockTemplateEngine.StockVendor(vendor, archetype, vendorIndex);
 
+        // SP-033/SP-034: slot-specific themed apparel/title, equipped AFTER
+        // stock so it's the last thing to touch the vendor's own Items list
+        // this spawn - NameWornApparel below has to run after it, not
+        // before, or the new pieces it just equipped would still show up
+        // unnamed. vendorIndex threads through so a shop's own Vendor 1..4
+        // each get the title/apparel matching what THAT slot actually
+        // sells, not one title per archetype.
+        StockTemplateEngine.ApplyVendorTheme(vendor, archetype, vendorIndex);
+        NameWornApparel(vendor);
+
         return vendor;
     }
 
     // Type-keyed so it stays correct if a future ModernUO version changes
     // what InitOutfit equips; anything unrecognized still gets a non-null
-    // fallback rather than being left to crash on single-click.
+    // fallback rather than being left to crash on single-click. SP-033:
+    // now also covers BaseArmor/BaseWeapon, not just BaseClothing - the
+    // archetype theming pieces (RingmailLegs, LeatherChest, Bow, ...)
+    // ApplyVendorTheme equips are those two kinds too, not just clothing.
     private static void NameWornApparel(Mobile vendor)
     {
         foreach (var item in vendor.Items)
         {
-            if (item is BaseClothing { Name: null } clothing)
+            switch (item)
             {
-                clothing.Name = ApparelName(clothing);
+                case BaseClothing { Name: null } clothing:
+                    clothing.Name = ApparelName(clothing);
+                    break;
+                case BaseArmor { Name: null } armor:
+                    armor.Name = ApparelName(armor);
+                    break;
+                case BaseWeapon { Name: null } weapon:
+                    weapon.Name = ApparelName(weapon);
+                    break;
             }
         }
     }
 
     private static string ApparelName(BaseClothing clothing) => clothing switch
     {
-        FancyShirt => "a fancy shirt",
-        LongPants  => "a pair of long pants",
-        BodySash   => "a body sash",
-        Boots      => "a pair of boots",
-        Cloak      => "a cloak",
-        _          => clothing.GetType().Name
+        FancyShirt  => "a fancy shirt",
+        LongPants   => "a pair of long pants",
+        BodySash    => "a body sash",
+        Boots       => "a pair of boots",
+        Cloak       => "a cloak",
+        FullApron   => "a full apron",
+        HalfApron   => "a half apron",
+        WizardsHat  => "a wizard's hat",
+        WideBrimHat => "a wide-brimmed hat",
+        FloppyHat   => "a floppy hat",
+        Cap         => "a cap",
+        Bandana     => "a bandana",
+        Shirt       => "a shirt",
+        Robe        => "a robe",
+        _           => clothing.GetType().Name
+    };
+
+    private static string ApparelName(BaseArmor armor) => armor switch
+    {
+        RingmailLegs => "a pair of ringmail leggings",
+        LeatherChest => "a leather tunic",
+        ChainCoif    => "a chain coif",
+        HeaterShield => "a heater shield",
+        _            => armor.GetType().Name
+    };
+
+    private static string ApparelName(BaseWeapon weapon) => weapon switch
+    {
+        Bow      => "a bow",
+        Katana   => "a katana",
+        Hatchet  => "a hatchet",
+        Pickaxe  => "a pickaxe",
+        _        => weapon.GetType().Name
     };
 }

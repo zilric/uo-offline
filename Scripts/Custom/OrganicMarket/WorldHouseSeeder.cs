@@ -124,14 +124,20 @@ public static class WorldHouseSeeder
             if (IsAlreadyFulfilled(node, authority))
             {
                 fulfilled++;
-                logger.Information("SeedAll: {Node} already fulfilled", node.Name);
+                if (VerboseConfig.MarketSeeder)
+                {
+                    logger.Information("SeedAll: {Node} already fulfilled", node.Name);
+                }
             }
             else if (SeedOne(node, authority))
             {
                 fulfilled++;
-                logger.Information("SeedAll: seeded {Node}", node.Name);
+                if (VerboseConfig.MarketSeeder)
+                {
+                    logger.Information("SeedAll: seeded {Node}", node.Name);
+                }
             }
-            else
+            else if (VerboseConfig.MarketSeeder)
             {
                 logger.Information("SeedAll: no valid ground found for {Node}", node.Name);
             }
@@ -231,20 +237,26 @@ public static class WorldHouseSeeder
                     if (asVendor)
                     {
                         vendors++;
-                        logger.Information("SeedInhabitation: opened a vendor shop at {Node}", node.Name);
+                        if (VerboseConfig.MarketSeeder)
+                        {
+                            logger.Information("SeedInhabitation: opened a vendor shop at {Node}", node.Name);
+                        }
                     }
                     else
                     {
                         fillers++;
-                        logger.Information("SeedInhabitation: settled an ambient home at {Node}", node.Name);
+                        if (VerboseConfig.MarketSeeder)
+                        {
+                            logger.Information("SeedInhabitation: settled an ambient home at {Node}", node.Name);
+                        }
                     }
                 }
-                else
+                else if (VerboseConfig.MarketSeeder)
                 {
                     logger.Information("SeedInhabitation: no valid ground found for {Node}", node.Name);
                 }
             }
-            else
+            else if (VerboseConfig.MarketSeeder)
             {
                 logger.Information("SeedInhabitation: {Node} already fulfilled", node.Name);
             }
@@ -278,7 +290,10 @@ public static class WorldHouseSeeder
                 if (ClusterAttempt(node, authority))
                 {
                     fillers++;
-                    logger.Information("SeedInhabitation: settled a cluster home near {Node}", node.Name);
+                    if (VerboseConfig.MarketSeeder)
+                    {
+                        logger.Information("SeedInhabitation: settled a cluster home near {Node}", node.Name);
+                    }
                 }
             }
 

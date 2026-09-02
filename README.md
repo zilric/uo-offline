@@ -6,8 +6,16 @@ The point of it is the PlayerBots. The world is full of bots that fight, shop, b
 
 Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https://github.com/ClassicUO/ClassicUO). T2A era, all on localhost.
 
-Currently this is just a fork of Klein187/uo-offline with a added server-install.sh script to install JUST the server part of this and set it up to allow LAN connections so you can play from a different
-computer, should also allow multiplayer.
+**Fork Enhancements & Custom Features:**
+- **Dedicated LAN Server Setup:** Includes `install-server.sh` for headless/LAN server installation and multi-client LAN play.
+- **Organic Market System (`Scripts/Custom/OrganicMarket/`):**
+  - World-seeded ambient player shops across Britannia with themed archetypes (Blacksmith, Scribe, Fletcher, Tailor, Provisioner, Alchemist).
+  - Dynamic vendor stocking engine featuring multi-stacked resources, pre-marked and charged runebooks, display subcontainers, and authentic hue palettes.
+  - Intelligent restock lifecycles (startup threshold checks + active server uptime rotation intervals).
+- **Administrative & Inspection Tools:**
+  - `[vh` command for rapid vendor house inspection, teleportation, and management.
+  - Config-backed logging manager with file-based (`verbose.cfg`) and in-game (`[verbose`) granular controls for server and market console output.
+- **PlayerBot Market Interaction:** Integrated bot shopping routines where roaming bots occasionally detour to browse local vendor counters before resuming their travels.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>
