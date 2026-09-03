@@ -6,6 +6,7 @@
 // ownership instead of deleting anything.
 // =========================================================================
 
+using System.Collections.Generic;
 using Server;
 using Server.Gumps;
 using Server.Mobiles;
@@ -135,6 +136,27 @@ public class AmbientHousePurchaseGump : DynamicGump
         house.ChangeLocks(from);
         house.LastTraded = Core.Now;
         house.RestrictDecay = false;
+
+        // SP-034: strip every ambient decor lockdown before handing the
+        // house over - DynamicClutterGenerator/FurnishResidential locked
+        // these down under `authority`, not the buyer, so leaving them in
+        // place would count against the NEW owner's own lockdown limit
+        // and clutter a house they're about to decorate themselves. Same
+        // "copy first" idiom MerchantGuildAuthority.DeleteAt's own
+        // footprint sweep uses - deleting a locked-down item mutates
+        // house.LockDowns as it goes, which would skip entries mid-loop
+        // if this iterated the live list directly. A straight Delete()
+        // (not Release, which requires the caller to be a live co-owner
+        // and exists for a player manually unlocking their own item) is
+        // the same mechanism DeleteAt's teardown sweep already uses for
+        // exactly this "make every locked-down fixture gone" case.
+        foreach (var item in new List<Item>(house.LockDowns))
+        {
+            if (item?.Deleted == false)
+            {
+                item.Delete();
+            }
+        }
 
         // Crucial: pull this slot out of the registry so [Wipe All Market
         // Houses] can never touch it again.

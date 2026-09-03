@@ -291,11 +291,14 @@ public static class OrganicMarketSpawner
             house.Public = true;
             UnlockDoors(house);
 
-            // Clutter goes down BEFORE the vendor spot is chosen:
-            // InteriorTileFinder reads house.LockDowns to steer clear of
-            // it, which only works if it's already locked down by the
-            // time it scans.
-            DynamicClutterGenerator.Furnish(house, a, authority);
+            // Clutter (and the counter/vendor anchor) goes down BEFORE the
+            // remaining vendor spots are chosen: InteriorTileFinder reads
+            // house.LockDowns to steer clear of it, which only works if
+            // it's already locked down by the time it scans, and the
+            // anchor tile returned here needs to already be reserved
+            // (DynamicClutterGenerator.Furnish itself seeds it into the
+            // wall-fixture pass's own placed-tile list).
+            var anchor = DynamicClutterGenerator.Furnish(house, style, a, authority);
 
             // SP-028: 2-4 vendors, all under the same archetype, per shop
             // - see VendorCountFor. MerchantGuildAuthority.Register still
@@ -307,7 +310,7 @@ public static class OrganicMarketSpawner
             // automatically by PlayerVendor.House's fieldChanged hook),
             // which is what MerchantGuildAuthority.DeleteAt now iterates
             // for teardown instead of just the tracked primary.
-            var vendors = SpawnVendors(authority, house, style, a);
+            var vendors = SpawnVendors(authority, house, style, a, anchor);
             authority.Register(house, ArchetypeName(a), vendors[0]);
         }
         else
@@ -564,33 +567,59 @@ public static class OrganicMarketSpawner
     // registration needed for that list), and each vendor's gold reserves
     // are set to VendorCommissionCeiling so the daily upkeep charge
     // (PayTimer.OnTick) never exceeds what it's holding.
-    private static List<PlayerVendor> SpawnVendors(Mobile authority, BaseHouse house, MarketHouseStyle style, MarketArchetype archetype)
+    private static List<PlayerVendor> SpawnVendors(
+        Mobile authority, BaseHouse house, MarketHouseStyle style, MarketArchetype archetype,
+        (Point3D Spot, Direction Facing)? anchor
+    )
     {
         var vendors = new List<PlayerVendor>();
-        var spots = InteriorTileFinder.TryFindVendorSpots(house, VendorCountFor(style));
+        var count = VendorCountFor(style);
 
-        if (spots.Count == 0)
+        // SP-034: the primary vendor gets DynamicClutterGenerator's own
+        // counter-anchored spot (1 tile behind the counter's center,
+        // facing back out over it toward the door) whenever one exists,
+        // instead of being just another entry from TryFindVendorSpots.
+        if (anchor is { } primary)
+        {
+            vendors.Add(SpawnOneVendor(authority, house, archetype, primary.Spot, primary.Facing, 0));
+        }
+
+        var remaining = count - vendors.Count;
+        if (remaining > 0)
+        {
+            // Fetches up to `count` candidates, not just `remaining` -
+            // IsNearFixture already rejects anything within 1 tile of the
+            // now-locked-down counter (which includes the anchor tile
+            // itself, exactly 1 tile behind the counter's own center), so
+            // no separate de-dup against `anchor` is needed here.
+            var spots = InteriorTileFinder.TryFindVendorSpots(house, count);
+            foreach (var (loc, facing) in spots)
+            {
+                if (vendors.Count >= count)
+                {
+                    break;
+                }
+
+                // SP-028: index threaded through to StockTemplateEngine.
+                // StockVendor as this vendor's own tier - see that file's
+                // header note on why a multi-vendor shop stocks three
+                // distinct tiers instead of the same items four times
+                // over.
+                vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, vendors.Count));
+            }
+        }
+
+        if (vendors.Count == 0)
         {
             // Nothing on the floor plan qualified (a very small or oddly
-            // shaped interior) - fall back to just inside the sign, same
-            // as the original single-vendor spawner did, so there's still
-            // always at least one vendor and it's still always somewhere
-            // inside the house.
+            // shaped interior, or no door at all) - fall back to just
+            // inside the sign, same as the original single-vendor spawner
+            // did, so there's still always at least one vendor and it's
+            // still always somewhere inside the house.
             var loc = house.Sign?.Location ?? new Point3D(house.X, house.Y - 1, house.Z);
             var faceTarget = InteriorTileFinder.FrontDoorLocation(house) ?? house.BanLocation;
             var facing = InteriorTileFinder.DirectionTo(loc, faceTarget);
             vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, 0));
-            return vendors;
-        }
-
-        // SP-028: index threaded through to StockTemplateEngine.StockVendor
-        // as this vendor's own tier - see that file's header note on why a
-        // multi-vendor shop stocks three distinct tiers instead of the
-        // same items four times over.
-        var index = 0;
-        foreach (var (loc, facing) in spots)
-        {
-            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, index++));
         }
 
         return vendors;
@@ -604,7 +633,14 @@ public static class OrganicMarketSpawner
         {
             ShopName = $"{ArchetypeName(archetype)} Test Shop",
             HoldGold = VendorCommissionCeiling,
-            BankAccount = VendorCommissionCeiling
+            BankAccount = VendorCommissionCeiling,
+
+            // SP-034: "vendors never drift away from their station" - a
+            // commissioned PlayerVendor doesn't wander on its own today,
+            // but this is the same belt-and-suspenders anchor the ticket
+            // asks for regardless, cheap insurance against any future AI
+            // path that might otherwise nudge it off its assigned tile.
+            CantWalk = true
         };
 
         vendor.MoveToWorld(loc, house.Map);

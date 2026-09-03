@@ -4,8 +4,14 @@
 // against a wall (the shared helpers below, also used by
 // DynamicClutterGenerator). Nothing here ever resolves to a sign-adjacent
 // exterior tile, a doorway, or an upper-floor offset.
+//
+// SP-036: also builds the stair/ladder exclusion set (ComputeStair
+// ExclusionZones) every vendor spot AND every piece of decor has to clear
+// - see that method's own header for why floor/door proxies alone missed
+// real stair and ladder footprints.
 // =========================================================================
 
+using System;
 using System.Collections.Generic;
 using Server.Items;
 using Server.Multis;
@@ -49,11 +55,10 @@ public static class InteriorTileFinder
     // SP-028: scans the house's own floor plan (BaseHouse.Area) for up to
     // `count` ground-floor interior tiles, each also kept clear of every
     // OTHER spot already chosen this call (VendorSpacing) as well as
-    // doors/sign/fixtures. Returns however many it actually found - which
-    // can be fewer than `count` on a small floor plan - so callers should
-    // treat the result list's
-    // own length as the real vendor count for this house, not assume it
-    // always equals what was asked for.
+    // doors/sign/fixtures/stairs. Returns however many it actually found -
+    // which can be fewer than `count` on a small floor plan - so callers
+    // should treat the result list's own length as the real vendor count
+    // for this house, not assume it always equals what was asked for.
     public static List<(Point3D Loc, Direction Facing)> TryFindVendorSpots(BaseHouse house, int count)
     {
         var results = new List<(Point3D Loc, Direction Facing)>();
@@ -65,6 +70,12 @@ public static class InteriorTileFinder
         }
 
         var faceTarget = FrontDoorLocation(house) ?? house.Sign?.Location ?? house.BanLocation;
+
+        // SP-036: a vendor planted on/beside a staircase or ladder is
+        // just as much an obstruction as a piece of decor would be -
+        // same exclusion set DynamicClutterGenerator's own furnishing
+        // pass uses.
+        var stairZones = ComputeStairExclusionZones(house);
 
         foreach (var rect in house.Area)
         {
@@ -86,6 +97,7 @@ public static class InteriorTileFinder
                     if (IsNearDoor(house, x, y, DoorClearance) ||
                         IsNearSign(house, x, y, SignClearance) ||
                         IsNearFixture(house, x, y, candidate.Z, FixtureClearance) ||
+                        stairZones.Contains(new Point2D(x, y)) ||
                         TooCloseToChosen(results, x, y, VendorSpacing))
                     {
                         continue;
@@ -230,6 +242,169 @@ public static class InteriorTileFinder
         }
 
         return false;
+    }
+
+    // SP-035: how many Z units apart each additional floor sits - the
+    // same "~20 Z units per story" figure IsGroundFloorInterior's own
+    // header comment above already established for why
+    // MaxGroundFloorOffset stays well under a second story's own floor.
+    // Only consulted by the floor-aware overloads below; floor 0 exactly
+    // reproduces IsGroundFloorInterior/IsWallAdjacent's own window, so
+    // every existing ground-floor-only caller (vendor spots, the
+    // counter) is completely unaffected by this addition.
+    private const int StoryHeight = 20;
+
+    // Floor-aware sibling of IsGroundFloorInterior - identical
+    // CanSpawnMobile-against-a-bounded-Z-window technique, just re-based
+    // `floorIndex` full stories above house.Z instead of always exactly
+    // at it. floorIndex 0 is byte-for-byte the same window
+    // IsGroundFloorInterior itself uses.
+    public static bool IsFloorInterior(BaseHouse house, Map map, int x, int y, int floorIndex, out Point3D candidate)
+    {
+        candidate = Point3D.Zero;
+
+        var baseZ = house.Z + floorIndex * StoryHeight;
+
+        if (!map.CanSpawnMobile(
+                x, y, baseZ + MinGroundFloorOffset, baseZ + MaxGroundFloorOffset,
+                canSwim: false, cantWalk: false, out var z
+            ))
+        {
+            return false;
+        }
+
+        var loc = new Point3D(x, y, z);
+
+        if (!house.IsInside(loc, 16))
+        {
+            return false;
+        }
+
+        candidate = loc;
+        return true;
+    }
+
+    // Floor-aware sibling of IsWallAdjacent - same 8-neighbor ring, just
+    // tested against `floorIndex`'s own floor instead of always the
+    // ground floor, so an upper-story tile's "against the wall" check
+    // doesn't end up consulting the floor below it.
+    public static bool IsWallAdjacent(BaseHouse house, Map map, int x, int y, int floorIndex)
+    {
+        for (var dx = -1; dx <= 1; dx++)
+        {
+            for (var dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0)
+                {
+                    continue;
+                }
+
+                if (!IsFloorInterior(house, map, x + dx, y + dy, floorIndex, out _))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // SP-036: the engine's own verified classic-house stair tile catalog -
+    // mirrors Multis/Houses/HouseFoundation.cs's private m_BlockIDs/
+    // m_StairSeqs/m_StairIDs tables exactly (that file builds real GM
+    // "add stairs" tooling around these same IDs, so they're proven
+    // correct, not a guess). HouseFoundation itself is a different,
+    // customizable-house code path this system doesn't use and that file
+    // is core engine content this project doesn't modify, so the values
+    // are copied here rather than referenced.
+    private static readonly int[] KnownStairIds =
+    {
+        0x3EE, 0x709, 0x71E, 0x721, 0x738, 0x750, 0x76C, 0x788,
+        0x7A3, 0x7BA, 0x35D2, 0x3609, 0x4317, 0x4318, 0x4B07, 0x7807,
+        0x3EF, 0x70A, 0x722, 0x739, 0x751, 0x76D, 0x789, 0x7A4,
+        0x71F, 0x736, 0x737, 0x749, 0x35D4, 0x35D3, 0x35D6, 0x35D5,
+        0x360B, 0x360A, 0x360D, 0x360C, 0x4360, 0x435E, 0x435F, 0x4361,
+        0x435C, 0x435A, 0x435B, 0x435D, 0x4364, 0x4362, 0x4363, 0x4365,
+        0x4B05, 0x4B04, 0x4B34, 0x4B33, 0x7809, 0x7808, 0x780A, 0x780B,
+        0x7BB, 0x7BC
+    };
+
+    // SP-036: real ladder tile art, mirrored from Items/Special/Heritage
+    // Items/HouseLadder.cs's own component IDs (base/rung/landing pieces
+    // for every facing) - the same graphics the client already renders
+    // for every in-game ladder, not a guess at an unverified ID.
+    private static readonly int[] KnownLadderIds =
+    {
+        0x3DB2, 0x3DB3, 0x3DB4, 0x3DB5, 0x3DB6, 0x3DB7,
+        0x2FDE, 0x2FDF, 0x3F28
+    };
+
+    // True if `itemId` is a stair or ladder tile - either flagged as one
+    // directly in the client's own tiledata (StairBack/StairRight for
+    // diagonal stair art, Bridge for the graduated-height ramp behavior
+    // both stairs AND ladders rely on to be climbable at all), or a known
+    // ID from the verified catalogs above. Two independent signals
+    // deliberately kept as an OR, not just one - between them they catch
+    // real stair/ladder art this codebase can't otherwise visually
+    // verify tile-by-tile.
+    private static bool IsStairOrLadderTile(int itemId)
+    {
+        var id = itemId & TileData.MaxItemValue;
+        var flags = TileData.ItemTable[id].Flags;
+
+        if ((flags & (TileFlag.StairBack | TileFlag.StairRight | TileFlag.Bridge)) != 0)
+        {
+            return true;
+        }
+
+        return Array.IndexOf(KnownStairIds, id) >= 0 || Array.IndexOf(KnownLadderIds, id) >= 0;
+    }
+
+    // SP-036: every world (x, y) a stair or ladder component occupies, in
+    // this house's own art (house.Components - the SAME MultiComponentList
+    // every instance of this style shares, at offsets from house.X/Y),
+    // plus a full 1-tile buffer (all 8 neighbors) around each one - "the
+    // foot and head of every staircase or ladder," per the ticket.
+    // Deliberately Z-agnostic (a plain 2D set, checked the same way
+    // regardless of which floor a candidate tile is on): the ground-
+    // floor-door proxy this replaced only ever protected the ENTRANCE
+    // door's own X/Y, not the actual stair footprint - real stairs run
+    // through varying Z as they climb, and a set keyed only on (x, y)
+    // catches every step of that climb, and every landing above it, in
+    // one pass, without needing to reason about which Z band a given
+    // step's own OffsetZ falls into. Computed fresh per call (once per
+    // house furnishing pass, not once per candidate tile) - see
+    // DynamicClutterGenerator.Furnish and TryFindVendorSpots above for
+    // the two call sites.
+    public static HashSet<Point2D> ComputeStairExclusionZones(BaseHouse house)
+    {
+        var zones = new HashSet<Point2D>();
+
+        if (house == null)
+        {
+            return zones;
+        }
+
+        foreach (var entry in house.Components.List)
+        {
+            if (!IsStairOrLadderTile(entry.ItemId))
+            {
+                continue;
+            }
+
+            var x = house.X + entry.OffsetX;
+            var y = house.Y + entry.OffsetY;
+
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    zones.Add(new Point2D(x + dx, y + dy));
+                }
+            }
+        }
+
+        return zones;
     }
 
     public static bool IsNearDoor(BaseHouse house, int x, int y, int clearance)

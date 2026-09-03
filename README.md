@@ -12,10 +12,13 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
   - World-seeded ambient player shops across Britannia with themed archetypes (Blacksmith, Scribe, Fletcher, Tailor, Provisioner, Alchemist).
   - Dynamic vendor stocking engine featuring multi-stacked resources, pre-marked and charged runebooks, display subcontainers, and authentic hue palettes.
   - Intelligent restock lifecycles (startup threshold checks + active server uptime rotation intervals).
+  - **Counter Layouts & Scaled Decor:** Dedicated wooden/stone shop counters with vendors anchored in a stationary position behind them, plus interior decoration density that scales with each house's own footprint size (from cozy small cottages up through fully-furnished multi-floor manors), keeping stairs, ladders, and walkways clear.
 - **Administrative & Inspection Tools:**
   - `[vh` command for rapid vendor house inspection, teleportation, and management.
   - Config-backed logging manager with file-based (`verbose.cfg`) and in-game (`[verbose`) granular controls for server and market console output.
-- **PlayerBot Market Interaction:** Integrated bot shopping routines where roaming bots occasionally detour to browse local vendor counters before resuming their travels.
+- **PlayerBot Market Interaction:**
+  - **Dynamic Bot Navigation & Standoff:** Roaming bots passing a shop can detour to the customer-side counter tile, orient toward the shopkeeper, and dwell quietly for 5–10 seconds before cleanly resuming their previous task - no collisions, no dropped navigation state, no rubberbanding on the way out.
+  - **Per-Bot Detour Cooldowns:** Anti-loop timers ensure a bot that's just browsed a shop won't immediately loop back into another detour at the same location.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>
