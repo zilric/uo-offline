@@ -19,6 +19,11 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
 - **PlayerBot Market Interaction:**
   - **Dynamic Bot Navigation & Standoff:** Roaming bots passing a shop can detour to the customer-side counter tile, orient toward the shopkeeper, and dwell quietly for 5–10 seconds before cleanly resuming their previous task - no collisions, no dropped navigation state, no rubberbanding on the way out.
   - **Per-Bot Detour Cooldowns:** Anti-loop timers ensure a bot that's just browsed a shop won't immediately loop back into another detour at the same location.
+- **Player-Owned House Patronage AI:**
+  - **Dynamic Customer Spawns:** A background scanner detects player houses with active vendors and schedules shopper visits every 30–60 minutes, scaling frequency up for well-stocked shops and down for sparse ones based on total vendor count and inventory depth.
+  - **Dynamic Arrival Sequences:** Shopper bots arrive via thematic Moongates (linking to a real Britannia city bank), Recall spell effects, or on-foot pathing up to the shop, then depart the same way they came.
+  - **Autonomous Appraisal & Purchases:** Bots inspect a vendor's mixed inventory, weigh listed prices against real market baselines, and buy what's reasonably priced - gold is transferred directly into `PlayerVendor.HoldGold`.
+  - **Diagnostic Testing (`[spawnbuyer`):** GM command that instantly spawns a forced shopper against a targeted vendor or house, guaranteeing a test purchase for verifying gold flow and arrival effects on demand.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>

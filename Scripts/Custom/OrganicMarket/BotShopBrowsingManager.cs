@@ -497,7 +497,10 @@ public static class BotShopBrowsingManager
     // live-configured movement-speed settings (movement.delay.walkMount/
     // walkFoot), not guessed constants - they default to exactly the
     // ticket's own "~200ms mounted / ~380-400ms foot" walking figures.
-    private static TimeSpan ComputeStepDelay(Mobile bot) =>
+    // SP-036: internal rather than private - PlayerShopPatronageManager
+    // reuses this exact pacing logic for its own shopper approach/departure
+    // walks rather than duplicating it.
+    internal static TimeSpan ComputeStepDelay(Mobile bot) =>
         TimeSpan.FromMilliseconds(bot.Mounted ? CalcMoves.WalkMountDelay : CalcMoves.WalkFootDelay);
 
     // SP-037: the real customer-side standoff tile, not just an assumed
@@ -516,7 +519,11 @@ public static class BotShopBrowsingManager
     // onto the counter's own raised tabletop or resolve to a porch/
     // exterior Z) and the house's own stair/ladder exclusion zone before
     // being accepted.
-    private static Point3D ComputeCounterSpot(PlayerVendor vendor, HashSet<Point2D> stairZones)
+    //
+    // SP-036: internal rather than private - PlayerShopPatronageManager
+    // reuses this same geometry for its own real-purchase shopper visits
+    // instead of duplicating the counter-lookup/fallback-ladder logic.
+    internal static Point3D ComputeCounterSpot(PlayerVendor vendor, HashSet<Point2D> stairZones)
     {
         var map = vendor.Map;
         var house = vendor.House;

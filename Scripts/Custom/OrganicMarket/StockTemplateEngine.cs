@@ -55,7 +55,12 @@ public static class StockTemplateEngine
     // isn't already priced inline at its own call site (a themed
     // subcontainer's price is always passed explicitly - this dictionary
     // only covers items SellLoose falls back to for a bare Type lookup).
-    private static readonly Dictionary<Type, int> BasePrices = new()
+    //
+    // SP-036: internal rather than private - PlayerShopPatronageManager
+    // reuses this as a secondary appraisal baseline (behind the real
+    // IShopSellInfo/SBInfo pricing oracle) for common resources/tools a
+    // real player vendor might also be listing.
+    internal static readonly Dictionary<Type, int> BasePrices = new()
     {
         [typeof(BlackPearl)]   = 3,
         [typeof(Bloodmoss)]    = 3,
