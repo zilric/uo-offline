@@ -11,6 +11,7 @@
 using System;
 using System.Collections.Generic;
 using Server;
+using Server.Engines.Housing;
 using Server.Items;
 using Server.Mobiles;
 using Server.Multis;
@@ -134,6 +135,26 @@ public static class OrganicMarketSpawner
     // multiple of ~909 doesn't consistently round down.
     public static int GetPurchasePrice(MarketHouseStyle style) =>
         (int)(Math.Round(GetBaseDeedPrice(style) * 1.10 / 1000.0) * 1000);
+
+    // SP-043: the "Purchase Furnished" surcharge on top of GetPurchasePrice
+    // — a flat per-item fee (the ticket's own suggested default) rather
+    // than summing each item's own base value, since ambient decor is
+    // generic furniture/clutter with no meaningfully distinct per-item
+    // price data to sum in the first place.
+    //
+    // SP-044: counts Housing.HouseDecorCommands.CollectDecorItems, not a
+    // bare house.LockDowns.Count — a house's own addons (their real,
+    // visible Components) and stray non-movable props that were never
+    // lockdown-eligible to begin with (Anvil/Forge — plain Items that
+    // construct themselves Movable = false, so BaseHouse.LockDown's own
+    // gate can never register them; see HouseDecorCommands' own header)
+    // are real decor a buyer is paying to keep furnished just as much as
+    // an ordinary locked-down chair is, and undercounting them here would
+    // let a Furnished purchase keep more than it actually charged for.
+    public const int FurnishingFeePerItem = 75;
+
+    public static int GetFurnishingFee(BaseHouse house) =>
+        house?.Deleted != false ? 0 : HouseDecorCommands.CollectDecorItems(house).Count * FurnishingFeePerItem;
 
     // The real house multi ID and deed placement offset for each style —
     // same values the stock house deeds use (Multis/Deeds.cs), so the
@@ -465,15 +486,21 @@ public static class OrganicMarketSpawner
     // handles the case where one DOES exist; this handles the case where it
     // doesn't). Gravestone/tombstone static art IDs 0x1165-0x1184 and
     // 0x124B-0x1252 mark consecrated burial ground regardless.
-    private const int FootprintConflictMargin = 10;
-
+    // SP-043: was a single isotropic FootprintConflictMargin = 10 tiles on
+    // every side. Now sourced from HousePlacementConfig (Scripts/Custom/
+    // Housing/HousePlacementConfig.cs) so density is centrally tunable,
+    // and anisotropic — tight on the sides (3), wider front-to-back (5) —
+    // so ambient houses can pack into a real streetscape row without
+    // choking off the ground a south-facing front door needs to actually
+    // be approached. See that file's own header for why every classic
+    // house style in this catalog maps X to "side" and Y to "front/back."
     private static bool HasFootprintConflict(Map map, Point3D center, int multiId)
     {
         var mcl = MultiData.GetComponents(multiId);
-        var startX = center.X + mcl.Min.X - FootprintConflictMargin;
-        var startY = center.Y + mcl.Min.Y - FootprintConflictMargin;
-        var endX = center.X + mcl.Min.X + mcl.Width + FootprintConflictMargin;
-        var endY = center.Y + mcl.Min.Y + mcl.Height + FootprintConflictMargin;
+        var startX = center.X + mcl.Min.X - HousePlacementConfig.SideToSideBuffer;
+        var startY = center.Y + mcl.Min.Y - HousePlacementConfig.FrontToBackBuffer;
+        var endX = center.X + mcl.Min.X + mcl.Width + HousePlacementConfig.SideToSideBuffer;
+        var endY = center.Y + mcl.Min.Y + mcl.Height + HousePlacementConfig.FrontToBackBuffer;
 
         for (var x = startX; x < endX; x++)
         {

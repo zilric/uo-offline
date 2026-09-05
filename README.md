@@ -13,9 +13,18 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
   - Dynamic vendor stocking engine featuring multi-stacked resources, pre-marked and charged runebooks, display subcontainers, and authentic hue palettes.
   - Intelligent restock lifecycles (startup threshold checks + active server uptime rotation intervals).
   - **Counter Layouts & Scaled Decor:** Dedicated wooden/stone shop counters with vendors anchored in a stationary position behind them, plus interior decoration density that scales with each house's own footprint size (from cozy small cottages up through fully-furnished multi-floor manors), keeping stairs, ladders, and walkways clear.
+- **House Decor Blueprint Engine (`[exportdecor` / `[importdecor`):**
+  - Footprint-compatible decor serialization to standalone JSON files organized by house layout category (`SmallOldStyle`, `TwoStory`, `SmallWorkshop`, and more).
+  - Interactive template selection GUMP for previewing and stamping a saved layout onto any matching property.
+- **Ambient Housing & Resident System:**
+  - Calibrated ambient vendor home spawn ratios to 12-15% of seeded ambient houses.
+  - Dynamic resident occupancy pulling from the idle bot pool (~10% occupancy at any time), with interior wandering and domestic routines.
+  - GM management commands: `[sendhome` (binds/teleports a bot home) and `[leavehome` (returns a resident bot to the active traveler pool).
 - **Administrative & Inspection Tools:**
   - `[vh` command for rapid vendor house inspection, teleportation, and management.
   - Config-backed logging manager with file-based (`verbose.cfg`) and in-game (`[verbose`) granular controls for server and market console output.
+- **Unified Admin Command Panel (`[panel` / `[plugins`):**
+  - Scrapes and aggregates custom and upstream commands into a single persistent, tabbed control GUMP.
 - **PlayerBot Market Interaction:**
   - **Dynamic Bot Navigation & Standoff:** Roaming bots passing a shop can detour to the customer-side counter tile, orient toward the shopkeeper, and dwell quietly for 5–10 seconds before cleanly resuming their previous task - no collisions, no dropped navigation state, no rubberbanding on the way out.
   - **Per-Bot Detour Cooldowns:** Anti-loop timers ensure a bot that's just browsed a shop won't immediately loop back into another detour at the same location.
@@ -29,6 +38,11 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
   - **Interactive Charter Gump:** Double-click or speak to any captain to open a two-column destination gump listing every other port with its lore and a distance-scaled fare (50-250gp, checked against backpack gold first, then bank balance).
   - **Island Integration:** Instant, reliable transit for players and their bonded pets between mainland ports and islands that were previously boat-only or moongate-only, without relying on public moongates.
   - `[seedferries` / `[wipeferries` GM commands deploy or cleanly remove the entire fleet of boats and captains in one pass.
+- **Maritime & Fisher Fleet Refinements:**
+  - Expanded ambient world vessels with an active ~60-boat coastal and open-water fishing fleet (`[seedfishers` / `[wipefishers`).
+  - Fixed Ferry Captain visual palettes, unblocked mast tile collisions, and adjusted the Yew dock anchor coordinates.
+- **Placement Spacing Configuration:**
+  - Decoupled placement conflict margins into dedicated directional buffers (`SideToSideBuffer = 3`, `FrontToBackBuffer = 5` tiles) for denser, more organic neighborhood seeding.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>

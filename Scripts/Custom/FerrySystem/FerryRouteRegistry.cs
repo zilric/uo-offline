@@ -63,9 +63,19 @@ public sealed class FerryStop
     public Point3D BoatLocation { get; }
 
     // Where a person actually stands on deck, directly behind the mast —
-    // BoatLocation + MarkOffset, rotated by BoatFacing. Used for the
-    // on-deck captain and for arriving/departing players/pets.
+    // BoatLocation + MarkOffset, rotated by BoatFacing. Used for
+    // arriving/departing players/pets.
     public Point3D DeckLanding { get; }
+
+    // SP-048: where the on-deck captain stands — one MORE MarkOffset step
+    // past DeckLanding, continuing in the same rotated direction (away
+    // from the boat's pivot/mast) rather than a fixed +1 X offset. A flat
+    // X offset happens to clear the mast for a North-facing boat (whose
+    // hull runs N/S) but walks the captain straight along an East/West
+    // boat's own hull axis instead of off to the side of it — using the
+    // same rotation DeckLanding already uses keeps this correct for every
+    // facing.
+    public Point3D CaptainLocation { get; }
 
     // North => Port/Starboard planks on the E/W sides (boat runs N/S,
     // broadside to a shore that's east or west of it).
@@ -78,7 +88,7 @@ public sealed class FerryStop
 
     public Map Map { get; }
 
-    public FerryStop(string name, string lore, Point3D boatLocation, Direction boatFacing)
+    public FerryStop(string name, string lore, Point3D boatLocation, Direction boatFacing, Point3D? captainLocationOverride = null)
     {
         Name = name;
         Lore = lore;
@@ -88,6 +98,13 @@ public sealed class FerryStop
 
         var (dx, dy) = RotateMarkOffset(boatFacing);
         DeckLanding = new Point3D(boatLocation.X + dx, boatLocation.Y + dy, boatLocation.Z + MarkOffset.Z);
+
+        // SP-049: Yew, Jhelom and Minoc's captains use a user-verified
+        // exact coordinate instead of the computed rotation — live
+        // testing found the real deck spot differs from what the
+        // rotation predicts at those three moorings specifically. Every
+        // other stop still uses the computed value.
+        CaptainLocation = captainLocationOverride ?? new Point3D(boatLocation.X + dx * 2, boatLocation.Y + dy * 2, DeckLanding.Z);
     }
 
     // Rotates MarkOffset's (X, Y) by the same count BaseBoat.Rotate uses
@@ -139,10 +156,12 @@ public static class FerryRouteRegistry
         ),
         // SP-045: deck coordinate (1379, 3902), facing East => DeckLanding
         // = BoatLocation + (-1, 0, 3), so BoatLocation = (1380, 3902, -4).
+        // SP-049: captain set to the user's own verified exact coordinate.
         new(
             "Jhelom Main Island Docks",
             "The warrior city's planks have outlasted a thousand storms.",
-            new Point3D(1380, 3902, -4), Direction.East
+            new Point3D(1380, 3902, -4), Direction.East,
+            captainLocationOverride: new Point3D(1380, 3903, -1)
         ),
         // SP-045: deck coordinate (4425, 1037), facing North.
         new(
@@ -166,13 +185,17 @@ public static class FerryRouteRegistry
         new(
             "Minoc Bay Docks",
             "Miners load ore barges for the run down to Britain.",
-            new Point3D(2534, 332, -4), Direction.East
+            new Point3D(2534, 332, -4), Direction.East,
+            captainLocationOverride: new Point3D(2534, 333, -1)
         ),
-        // SP-045: deck coordinate (511, 800), facing East.
+        // SP-048: shifted 1 tile west — deck coordinate now (510, 800),
+        // facing East => BoatLocation = (deckX+1, deckY) = (511, 800, -4).
+        // SP-049: captain set to the user's own verified exact coordinate.
         new(
             "Yew North Coast Pier",
             "A quiet coastal pier below the Empath Abbey.",
-            new Point3D(512, 800, -4), Direction.East
+            new Point3D(511, 800, -4), Direction.East,
+            captainLocationOverride: new Point3D(511, 801, -1)
         ),
         // SP-045: deck coordinate (4269, 597), facing North. The
         // SP-044-era "captain standing in the sea" report at this stop was

@@ -84,6 +84,14 @@ public static class WorldHouseSeeder
     // as neighbors, not a duplicate-detection collision.
     private const int CoverageRange = 18;
 
+    // SP-042: was a bare 0.10 literal. ~114 InhabitationNodes primary
+    // rolls at 0.135 (midpoint of the ticket's 12-15% target) yields
+    // roughly 15-16 vendor houses out of the ~125-150 total ambient
+    // structures this pass produces — matching the "15-20 out of ~140"
+    // target. Cluster-mate attempts (ClusterAttempt, below) are still
+    // always filler regardless of this constant — unchanged.
+    private const double VendorRollChance = 0.135;
+
     // Fire-and-forget: the actual placements happen across many timer
     // ticks after this returns, so there's no synchronous result to
     // hand back to the caller any more - the final "seeded X/Total"
@@ -229,7 +237,7 @@ public static class WorldHouseSeeder
 
             if (!IsAlreadyFulfilled(node, authority))
             {
-                var asVendor = Utility.RandomDouble() < 0.10;
+                var asVendor = Utility.RandomDouble() < VendorRollChance;
                 var placed = asVendor ? SeedOne(node, authority) : PlaceFillerAttempt(node, authority);
 
                 if (placed)
@@ -250,6 +258,16 @@ public static class WorldHouseSeeder
                             logger.Information("SeedInhabitation: settled an ambient home at {Node}", node.Name);
                         }
                     }
+                }
+                else if (asVendor)
+                {
+                    // SP-042: explicit, ungated warning — a vendor roll
+                    // that then finds no valid ground (for the vendor
+                    // counter, shopkeeper, or sign) used to fall through
+                    // silently into the same gated "no valid ground"
+                    // info log as an ordinary filler failure, with no way
+                    // to tell the two apart from the console.
+                    logger.Warning("[OrganicMarket] House at {Node} rolled vendor but failed clearance validation", node.Name);
                 }
                 else if (VerboseConfig.MarketSeeder)
                 {

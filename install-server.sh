@@ -1509,6 +1509,173 @@ install_ferrysystem() {
 }
 
 # ---------------------------------------------------------------------------
+# Command Panel (SP-046): deploy Scripts/Custom/CommandPanel/ into the
+# ModernUO source tree. Same straight-copy pattern as install_organicmarket/
+# install_ferrysystem above.
+# ---------------------------------------------------------------------------
+install_commandpanel() {
+  banner "Installing Command Panel (unified [panel GM command GUMP)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/CommandPanel"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/CommandPanel/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/CommandPanel"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Command Panel source unchanged. Skipping deploy."
+    return
+  fi
+
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Command Panel source changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Command Panel deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
+# Maritime (SP-048): deploy Scripts/Custom/Maritime/ into the ModernUO
+# source tree. Same straight-copy pattern as install_organicmarket/
+# install_ferrysystem/install_commandpanel above.
+# ---------------------------------------------------------------------------
+install_maritime() {
+  banner "Installing Maritime (ambient fisher fleet)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/Maritime"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/Maritime/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/Maritime"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Maritime source unchanged. Skipping deploy."
+    return
+  fi
+
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Maritime source changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Maritime deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
+# PlayerBot custom scripts (SP-042): deploy Scripts/Custom/PlayerBot/ into
+# the ModernUO source tree. Same straight-copy pattern as
+# install_organicmarket/install_ferrysystem/install_maritime above.
+#
+# NOT to be confused with install_playerbots (above), which deploys the
+# core CustomBots/ framework tree via a different mechanism entirely —
+# this is only for small Scripts/Custom/-scoped additions to that
+# framework, like HomeownerBehavior.cs, that don't belong inside the core
+# tree itself.
+# ---------------------------------------------------------------------------
+install_playerbot_scripts() {
+  banner "Installing PlayerBot custom scripts (ambient homeowner behavior)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/PlayerBot"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/PlayerBot/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/PlayerBot"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "PlayerBot custom scripts unchanged. Skipping deploy."
+    return
+  fi
+
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "PlayerBot custom scripts changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "PlayerBot custom scripts deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
+# Scripts/Custom/Housing/ deploy — SP-043: placement density config, decor
+# blueprint export/import (HouseTemplateRegistry/HouseDecorCommands/
+# HouseDecorGump). Same hash-gated *.cs mirror as install_playerbot_scripts
+# above, just a different destination folder.
+# ---------------------------------------------------------------------------
+install_housing_scripts() {
+  banner "Installing Housing custom scripts (placement density, decor blueprints)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/Housing"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/Housing/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/Housing"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Housing custom scripts unchanged. Skipping deploy."
+    return
+  fi
+
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Housing custom scripts changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Housing custom scripts deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
 # Lifecycle: install
 # ---------------------------------------------------------------------------
 do_install() {
@@ -1529,6 +1696,10 @@ do_install() {
   install_playerbots
   install_organicmarket
   install_ferrysystem
+  install_commandpanel
+  install_maritime
+  install_playerbot_scripts
+  install_housing_scripts
   install_map_editor
   build_modernuo
   fix_felucca_season
@@ -1578,6 +1749,10 @@ do_update() {
   install_playerbots
   install_organicmarket
   install_ferrysystem
+  install_commandpanel
+  install_maritime
+  install_playerbot_scripts
+  install_housing_scripts
 
   say "Forcing a rebuild against the updated source..."
   rm -f "${DIST_DIR}/ModernUO.dll"

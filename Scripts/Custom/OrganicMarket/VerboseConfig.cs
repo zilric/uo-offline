@@ -8,11 +8,14 @@
 // Not every category has a live consumer yet: MarketSeeder/VendorStock/
 // WorldHousing gate real logging in WorldHouseSeeder.cs/
 // StockTemplateEngine.cs/MerchantGuildAuthority.cs (all under
-// Scripts/Custom/OrganicMarket/), while Crafting/Pathfinding are reserved
-// for the PlayerBots subsystem, which lives outside Scripts/Custom/ and
-// is deliberately left untouched this sprint (see the workspace rule in
-// SP-032's own ticket). Their flags are still fully live/toggleable/
-// persisted - just unread until something in that subsystem checks them.
+// Scripts/Custom/OrganicMarket/), while Crafting/Pathfinding/
+// DungeonCrawler are reserved for the PlayerBots subsystem, which lives
+// outside Scripts/Custom/ and is deliberately left untouched this sprint
+// (see the workspace rule in SP-032's own ticket - DungeonCrawlerBehavior.cs
+// itself lives at CustomBots/Behaviors/DungeonCrawlerBehavior.cs, a core
+// file, same as Crafting/Pathfinding's own consumers). Their flags are
+// still fully live/toggleable/persisted - just unread until something in
+// that subsystem checks them.
 // =========================================================================
 
 using System;
@@ -55,6 +58,11 @@ public static class VerboseConfig
             false
         ),
         (
+            "DungeonCrawler",
+            "Dungeon crawl steps, encounters, boss fights, and loot generation (PlayerBots' DungeonCrawlerBehavior).",
+            false
+        ),
+        (
             "WorldHousing",
             "Sign purchase events and teardown sweeps (MerchantGuildAuthority, AmbientHousePurchaseGump).",
             true
@@ -67,6 +75,7 @@ public static class VerboseConfig
     public static bool VendorStock => Get("VendorStock");
     public static bool Crafting => Get("Crafting");
     public static bool Pathfinding => Get("Pathfinding");
+    public static bool DungeonCrawler => Get("DungeonCrawler");
     public static bool WorldHousing => Get("WorldHousing");
 
     // Generic lookup - falls back to that category's own documented

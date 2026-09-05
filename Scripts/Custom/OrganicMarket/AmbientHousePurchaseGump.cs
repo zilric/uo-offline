@@ -4,11 +4,34 @@
 // (AmbientHouseSign.OnDoubleClick). Same yes/no confirmation shape as
 // OrganicMarketWipeConfirmGump, but a confirmed purchase transfers real
 // ownership instead of deleting anything.
+//
+// SP-043: now a three-button choice instead of a single Buy/Cancel pair —
+// Purchase Vacant (base price, strips every locked-down decor item, same
+// behavior this gump always had) or Purchase Furnished (base price + a
+// flat per-item surcharge, keeps every locked-down item in place). Keeping
+// them is sufficient on its own: BaseHouse lockdown capacity/ownership is
+// tracked per-HOUSE, not per-account (see SetLockdown/CheckAosLockdowns,
+// Multis/Houses/BaseHouse.cs) — nothing about an existing LockDowns entry
+// references which Mobile locked it down, so the instant house.Owner
+// below flips to the buyer, those items are simply the new owner's own
+// fixtures. No per-item re-locking is needed or possible to do more
+// correctly than that.
+//
+// SP-044: Vacant's own strip loop and GetFurnishingFee's own count both
+// route through Housing.HouseDecorCommands.ClearDecor/CollectDecorItems
+// now, not a bare house.LockDowns walk — a house's own addons (a real
+// water trough, say) and stray non-movable props that were never
+// lockdown-eligible in the first place (Anvil/Forge — see
+// HouseDecorCommands' own header for why LockDowns was never the
+// complete picture) need the exact same treatment here that
+// [exportdecor/[importdecor already learned to give them, or Vacant would
+// leave an addon standing and Furnished would undercharge for one.
 // =========================================================================
 
-using System.Collections.Generic;
 using Server;
+using Server.Engines.Housing;
 using Server.Gumps;
+using Server.Items;
 using Server.Mobiles;
 using Server.Multis;
 using Server.Network;
@@ -19,8 +42,9 @@ public class AmbientHousePurchaseGump : DynamicGump
 {
     public override bool Singleton => true;
 
-    private const int ButtonBuy = 1;
+    private const int ButtonBuyVacant = 1;
     private const int ButtonCancel = 2;
+    private const int ButtonBuyFurnished = 3;
 
     private readonly BaseHouse _house;
     private readonly MarketHouseStyle _style;
@@ -43,11 +67,14 @@ public class AmbientHousePurchaseGump : DynamicGump
 
     protected override void BuildLayout(ref DynamicGumpBuilder builder)
     {
-        const int width = 380;
-        const int height = 230;
+        const int width = 420;
+        const int height = 290;
 
         var basePrice = OrganicMarketSpawner.GetBaseDeedPrice(_style);
         var purchasePrice = OrganicMarketSpawner.GetPurchasePrice(_style);
+        var furnishingFee = OrganicMarketSpawner.GetFurnishingFee(_house);
+        var furnishedPrice = purchasePrice + furnishingFee;
+        var itemCount = _house?.Deleted == false ? HouseDecorCommands.CollectDecorItems(_house).Count : 0;
 
         builder.AddPage();
         builder.AddBackground(0, 0, width, height, 5054);
@@ -56,36 +83,63 @@ public class AmbientHousePurchaseGump : DynamicGump
         builder.AddHtml(20, 20, width - 40, 20, "<center><basefont color=#FFD700>This House is For Sale</basefont></center>");
 
         builder.AddHtml(
-            20, 50, width - 40, 100,
+            20, 50, width - 40, 80,
             $"<basefont color=#FFFFFF>Style: {OrganicMarketSpawner.StyleName(_style)}<br>" +
             $"Base deed valuation: {basePrice:N0} gp<br>" +
-            $"Purchase price (+10%): {purchasePrice:N0} gp<br><br>" +
-            "Gold is withdrawn directly from your bank account.</basefont>"
+            $"This house currently has {itemCount} decorative item(s) inside.<br><br>" +
+            "Gold is withdrawn from your backpack first, then your bank.</basefont>"
         );
 
-        builder.AddButton(30, height - 40, 4017, 4019, ButtonBuy);
-        builder.AddLabel(66, height - 40, 0x59, "Buy House");
+        builder.AddHtml(
+            20, 130, width - 40, 40,
+            $"<basefont color=#88FF88>Purchase Vacant: {purchasePrice:N0} gp</basefont><br>" +
+            "<basefont color=#AAAAAA>Clears out all decor before you take ownership.</basefont>"
+        );
+        builder.AddButton(30, height - 90, 4017, 4019, ButtonBuyVacant);
+        builder.AddLabel(66, height - 90, 0x59, "Buy Vacant");
 
-        builder.AddButton(200, height - 40, 4005, 4007, ButtonCancel);
-        builder.AddLabel(236, height - 40, 0x480, "Cancel");
+        builder.AddHtml(
+            20, 178, width - 40, 40,
+            $"<basefont color=#88CCFF>Purchase Furnished: {furnishedPrice:N0} gp</basefont> " +
+            $"<basefont color=#777777>(+{furnishingFee:N0} gp for {itemCount} item(s))</basefont><br>" +
+            "<basefont color=#AAAAAA>Keeps every decor item, already locked down as yours.</basefont>"
+        );
+        builder.AddButton(30, height - 50, 4017, 4019, ButtonBuyFurnished);
+        builder.AddLabel(66, height - 50, 0x59, "Buy Furnished");
+
+        builder.AddButton(width - 110, height - 40, 4005, 4007, ButtonCancel);
+        builder.AddLabel(width - 74, height - 40, 0x480, "Cancel");
     }
 
     public override void OnResponse(NetState sender, in RelayInfo info)
     {
         var from = sender.Mobile;
-        if (from == null || info.ButtonID != ButtonBuy)
+        if (from == null)
         {
             return;
         }
 
-        TryPurchase(from, _house, _style);
+        switch (info.ButtonID)
+        {
+            case ButtonBuyVacant:
+                TryPurchase(from, _house, _style, keepFurnishings: false);
+                break;
+            case ButtonBuyFurnished:
+                TryPurchase(from, _house, _style, keepFurnishings: true);
+                break;
+        }
     }
 
     // Static and public so the actual purchase logic is reachable (and
     // testable) without a live client round-trip through the gump -
     // AmbientHouseSign.OnDoubleClick's own DisplayTo/OnResponse path is
     // just the normal player-facing entry point into the same method.
-    public static bool TryPurchase(Mobile from, BaseHouse house, MarketHouseStyle style)
+    //
+    // keepFurnishings selects Purchase Furnished (base price + a flat
+    // per-item surcharge, decor stays) over Purchase Vacant (base price
+    // only, decor is stripped — the sole behavior this method had before
+    // SP-043).
+    public static bool TryPurchase(Mobile from, BaseHouse house, MarketHouseStyle style, bool keepFurnishings)
     {
         var authority = MerchantGuildAuthority.Instance;
 
@@ -109,15 +163,25 @@ public class AmbientHousePurchaseGump : DynamicGump
         }
 
         var price = OrganicMarketSpawner.GetPurchasePrice(style);
-        if (Banker.GetBalance(from) < price)
+        if (keepFurnishings)
         {
-            from.SendMessage($"You do not have enough gold in your bank to buy this house ({price:N0} gp required).");
+            price += OrganicMarketSpawner.GetFurnishingFee(house);
+        }
+
+        // SP-043: checks (and, on success, spends from) the backpack
+        // before the bank, rather than Banker.GetBalance/Withdraw's own
+        // bank-only view - the ticket's explicit ask, and the more
+        // forgiving order for a player who just walked up with a purse of
+        // gold on hand.
+        if (TotalAvailableGold(from) < price)
+        {
+            from.SendMessage($"You do not have enough gold on hand or in your bank to buy this house ({price:N0} gp required).");
             return false;
         }
 
-        if (!Banker.Withdraw(from, price))
+        if (!TryPayGold(from, price))
         {
-            from.SendMessage("Your bank did not have enough gold to complete the purchase.");
+            from.SendMessage("You did not have enough gold to complete the purchase.");
             return false;
         }
 
@@ -137,25 +201,23 @@ public class AmbientHousePurchaseGump : DynamicGump
         house.LastTraded = Core.Now;
         house.RestrictDecay = false;
 
-        // SP-034: strip every ambient decor lockdown before handing the
-        // house over - DynamicClutterGenerator/FurnishResidential locked
-        // these down under `authority`, not the buyer, so leaving them in
-        // place would count against the NEW owner's own lockdown limit
-        // and clutter a house they're about to decorate themselves. Same
-        // "copy first" idiom MerchantGuildAuthority.DeleteAt's own
-        // footprint sweep uses - deleting a locked-down item mutates
-        // house.LockDowns as it goes, which would skip entries mid-loop
-        // if this iterated the live list directly. A straight Delete()
-        // (not Release, which requires the caller to be a live co-owner
-        // and exists for a player manually unlocking their own item) is
-        // the same mechanism DeleteAt's teardown sweep already uses for
-        // exactly this "make every locked-down fixture gone" case.
-        foreach (var item in new List<Item>(house.LockDowns))
+        // SP-034/SP-044: strip every ambient decor item before handing the
+        // house over, UNLESS the buyer paid the Furnished surcharge to
+        // keep it - LockDowns, addons (a real water trough, say - Delete()
+        // on the addon root cascades to its own Components), and any
+        // stray non-movable prop that was never lockdown-eligible to
+        // begin with (Anvil/Forge - see HouseDecorCommands' own header).
+        // DynamicClutterGenerator/FurnishResidential locked ordinary
+        // clutter down under `authority`, not the buyer, but a lockdown's
+        // ownership is entirely implicit in which house it's IN - nothing
+        // on the item itself remembers which Mobile locked it down (see
+        // BaseHouse.SetLockdown) - so the house.Owner assignment above is
+        // already all "converts decorative clutter to the buyer's own
+        // locked-down items" requires when keeping them; there is nothing
+        // more correct left to do per-item.
+        if (!keepFurnishings)
         {
-            if (item?.Deleted == false)
-            {
-                item.Delete();
-            }
+            HouseDecorCommands.ClearDecor(house);
         }
 
         // Crucial: pull this slot out of the registry so [Wipe All Market
@@ -176,7 +238,53 @@ public class AmbientHousePurchaseGump : DynamicGump
         newSign.MoveToWorld(signLoc, signMap);
         house.Sign = newSign;
 
-        from.SendMessage($"You have purchased this {OrganicMarketSpawner.StyleName(style)} for {price:N0} gold.");
+        from.SendMessage(
+            $"You have purchased this {OrganicMarketSpawner.StyleName(style)} " +
+            $"({(keepFurnishings ? "furnished" : "vacant")}) for {price:N0} gold."
+        );
         return true;
+    }
+
+    // ---- Combined backpack + bank gold handling ----
+    //
+    // Banker.GetBalance/Withdraw (Mobiles/Townfolk/Banker.cs) only ever
+    // look at account gold + the bank box - never the backpack. The
+    // ticket explicitly wants both checked, so these two wrap that pair
+    // with an initial backpack draw first.
+    private static int TotalAvailableGold(Mobile from)
+    {
+        var inPack = (long)(from.Backpack?.GetAmount(typeof(Gold)) ?? 0);
+        return (int)System.Math.Clamp(inPack + Banker.GetBalance(from), 0, int.MaxValue);
+    }
+
+    private static bool TryPayGold(Mobile from, int amount)
+    {
+        var inPack = from.Backpack?.GetAmount(typeof(Gold)) ?? 0;
+        var fromPack = System.Math.Min(inPack, amount);
+
+        if (fromPack > 0 && !from.Backpack.ConsumeTotal(typeof(Gold), fromPack))
+        {
+            return false;
+        }
+
+        var remaining = amount - fromPack;
+        if (remaining <= 0)
+        {
+            return true;
+        }
+
+        if (Banker.Withdraw(from, remaining))
+        {
+            return true;
+        }
+
+        // Bank came up short after the backpack portion was already
+        // spent — refund it so a failed purchase never partially charges.
+        if (fromPack > 0)
+        {
+            from.Backpack.DropItem(new Gold(fromPack));
+        }
+
+        return false;
     }
 }

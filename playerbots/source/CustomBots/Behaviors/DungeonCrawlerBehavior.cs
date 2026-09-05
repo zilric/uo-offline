@@ -42,6 +42,7 @@
 using System;
 using System.Collections.Generic;
 using Server;
+using Server.Engines.OrganicMarket;
 using Server.Items;
 using Server.Mobiles;
 
@@ -101,6 +102,23 @@ namespace Server.CustomBots
             return Camper
                 ? $"camping a room in {where}"
                 : $"crawling {where}";
+        }
+
+        // Every [DungeonCrawler] status/recovery line in this file routes
+        // through here instead of calling Console.WriteLine directly, so
+        // the flood reported with dozens of crawlers active can be
+        // silenced (or watched) live via [verbose -> DungeonCrawler
+        // (Scripts/Custom/OrganicMarket/VerboseConfig.cs) without a
+        // restart. Checked per call rather than cached, since a GM
+        // toggling the gump mid-session must take effect immediately.
+        private static void Log(string msg)
+        {
+            if (!VerboseConfig.Get("DungeonCrawler"))
+            {
+                return;
+            }
+
+            Console.WriteLine(msg);
         }
 
         private DateTime _runExpiresAt = DateTime.MinValue;
@@ -426,13 +444,13 @@ namespace Server.CustomBots
                     bot.Say(line);
                 }
                 BotEventJournal.Record("find", bot, find);
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: found {find} in " +
                     $"{DungeonName} L{Level}");
             }
             else if (CombatDebug && (gold > 0 || trinkets > 0))
             {
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: looted {gold}gp + " +
                     $"{trinkets} trinket(s) in {DungeonName} L{Level}");
             }
@@ -481,7 +499,7 @@ namespace Server.CustomBots
             if (prevMap == bot.Map && prevMap != null &&
                 Dist(prevLoc, bot.Location) > AccidentalJump)
             {
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: strayed onto a teleporter " +
                     $"({prevLoc} -> {bot.Location}) — resolving landing");
                 ResolveLanding(bot);
@@ -508,7 +526,7 @@ namespace Server.CustomBots
                             ? "Unknown Dungeon"
                             : regionName;
                         Level = 0;
-                        Console.WriteLine(
+                        Log(
                             $"[DungeonCrawler] {bot.Name}: unauthored floor — " +
                             $"hunting locally in {DungeonName}");
                     }
@@ -529,7 +547,7 @@ namespace Server.CustomBots
             if (!string.IsNullOrEmpty(DungeonName) &&
                 !DungeonRegistry.IsInDungeon(bot))
             {
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: outside {DungeonName} — resuming travel");
                 // Walked out alive: that's a survived run. Three of these
                 // buy a visible gear upgrade at the next bank visit
@@ -550,7 +568,7 @@ namespace Server.CustomBots
                 _lingering = false;
                 _route = null;
                 _targetPoint = null;
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: run over — exiting {DungeonName} from L{Level}");
             }
 
@@ -568,7 +586,7 @@ namespace Server.CustomBots
                     _lingering = false;
                     _route = null;
                     _targetPoint = null;
-                    Console.WriteLine(
+                    Log(
                         $"[DungeonCrawler] {bot.Name}: out of supplies — cutting " +
                         $"the {DungeonName} run short");
                 }
@@ -620,7 +638,7 @@ namespace Server.CustomBots
                 return false;
             }
 
-            Console.WriteLine(
+            Log(
                 $"[DungeonCrawler] {bot.Name}: hard-stuck at {bot.Location} in " +
                 $"{DungeonName} L{Level} ({(int)HardStuckAfter.TotalMinutes} min " +
                 $"without ground gained) — rescuing to the surface");
@@ -704,7 +722,7 @@ namespace Server.CustomBots
                 if (ExitMode && !_warnedNoExit)
                 {
                     _warnedNoExit = true;
-                    Console.WriteLine(
+                    Log(
                         $"[DungeonCrawler] {bot.Name}: no exit point on " +
                         $"{DungeonName} L{Level} — wandering until one is reachable");
                 }
@@ -718,7 +736,7 @@ namespace Server.CustomBots
                 !_notedWrongWayPad)
             {
                 _notedWrongWayPad = true;
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: no ascend on {DungeonName} " +
                     $"L{Level} — trying pad '{p.Name}' (mislabeled up-stair?)");
             }
@@ -777,7 +795,7 @@ namespace Server.CustomBots
 
             if (Camper)
             {
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: camping {p.Name} in {DungeonName}");
             }
 
@@ -912,7 +930,7 @@ namespace Server.CustomBots
                     return false;
                 }
 
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: teleporter at {_padTile} " +
                     $"({DungeonName} L{Level}) never fired — resuming crawl");
                 StuckTelemetry.Record(bot, "pad_timeout",
@@ -971,13 +989,13 @@ namespace Server.CustomBots
 
                 DungeonName = p.Dungeon;
                 ResumeAfterTransition(p.Level, refreshExitWindow: !bounce);
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: now on L{Level} of {DungeonName}" +
                     (bounce ? $" (bounce {_floorBounces})" : ""));
 
                 if (ExitMode && _floorBounces >= 2)
                 {
-                    Console.WriteLine(
+                    Log(
                         $"[DungeonCrawler] {bot.Name}: revolving door on the way out of " +
                         $"{DungeonName} — rescuing to the surface");
                     _floorBounces = 0;
@@ -997,7 +1015,7 @@ namespace Server.CustomBots
                     ? "Unknown Dungeon"
                     : regionName;
                 ResumeAfterTransition(0);
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: landed on an unauthored floor — " +
                     $"hunting locally in {DungeonName}");
                 StuckTelemetry.Record(bot, "unauthored_floor", DungeonName);
@@ -1005,7 +1023,7 @@ namespace Server.CustomBots
             else
             {
                 bot.Behavior = new TravelerBehavior();
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: climbed out to the surface");
             }
         }
@@ -1070,7 +1088,7 @@ namespace Server.CustomBots
                 // magic and no scroll.
                 if (MagicTravel.EmergencyEscape(bot, gate))
                 {
-                    Console.WriteLine(
+                    Log(
                         $"[DungeonCrawler] {bot.Name}: no way up from {DungeonName} " +
                         $"L{Level} — recalling out");
                     StuckTelemetry.Record(bot, "exit_gate_rescue",
@@ -1084,7 +1102,7 @@ namespace Server.CustomBots
                     return true; // the recall sequence attaches the fresh Traveler
                 }
 
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: no way up from {DungeonName} " +
                     $"L{Level} and no entrance authored — emerging at moongate " +
                     $"'{gate.Name}'");
@@ -1098,7 +1116,7 @@ namespace Server.CustomBots
 
             if (MagicTravel.EmergencyEscape(bot, entrance))
             {
-                Console.WriteLine(
+                Log(
                     $"[DungeonCrawler] {bot.Name}: no way up from {DungeonName} " +
                     $"L{Level} — recalling out");
                 StuckTelemetry.Record(bot, "exit_rescue",
@@ -1109,7 +1127,7 @@ namespace Server.CustomBots
                 return true;
             }
 
-            Console.WriteLine(
+            Log(
                 $"[DungeonCrawler] {bot.Name}: no way up from {DungeonName} " +
                 $"L{Level} — emerging at {entrance.Name}");
             StuckTelemetry.Record(bot, "exit_rescue",
@@ -1164,7 +1182,7 @@ namespace Server.CustomBots
             if (p == null) return false;
             DungeonName = p.Dungeon;
             Level = p.Level;
-            Console.WriteLine(
+            Log(
                 $"[DungeonCrawler] {bot.Name}: recovered context → {DungeonName} L{Level}");
             return true;
         }

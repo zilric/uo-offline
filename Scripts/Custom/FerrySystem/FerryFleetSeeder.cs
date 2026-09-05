@@ -1,5 +1,5 @@
 // =========================================================================
-// FerryFleetSeeder.cs — SP-043/SP-044: seeds a PermanentCharterBoat +
+// FerryFleetSeeder.cs — SP-043/SP-044/SP-048: seeds a PermanentCharterBoat +
 // on-deck CharterCaptain at every FerryRouteRegistry stop, plus the
 // [seedferries / [wipeferries GM commands. Replaces AmbientBoatSeeder.cs
 // and IslandOutpostSeeder.cs — there is no separate "hub" vs "outpost"
@@ -37,11 +37,6 @@ namespace Server.Engines.FerrySystem;
 
 public static class FerryFleetSeeder
 {
-    // How far from the boat's own deck-landing tile the captain stands,
-    // so an arriving/departing player (who lands exactly on DeckLanding)
-    // never stacks directly on top of them.
-    private const int CaptainOffsetX = 1;
-
     private static readonly TimeSpan FreshenInterval = TimeSpan.FromHours(6);
 
     public static void Configure()
@@ -124,9 +119,8 @@ public static class FerryFleetSeeder
 
         authority.Track(boat);
 
-        var captainSpot = new Point3D(stop.DeckLanding.X + CaptainOffsetX, stop.DeckLanding.Y, stop.DeckLanding.Z);
         var captain = new CharterCaptain(stop.Name);
-        captain.MoveToWorld(captainSpot, map);
+        captain.MoveToWorld(stop.CaptainLocation, map);
         authority.Track(captain);
 
         return true;
