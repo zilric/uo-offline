@@ -1464,6 +1464,51 @@ install_organicmarket() {
 }
 
 # ---------------------------------------------------------------------------
+# Ferry System (SP-039): deploy Scripts/Custom/FerrySystem/ into the
+# ModernUO source tree. Same straight-copy pattern as install_organicmarket
+# above (an SDK-style csproj compiles any .cs file under its own directory
+# by default), so no .csproj edit and no core-file edit is needed for it
+# to build.
+# ---------------------------------------------------------------------------
+install_ferrysystem() {
+  banner "Installing Ferry System (ambient boats, dockmasters, charter travel)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/FerrySystem"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/FerrySystem/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/FerrySystem"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Ferry System source unchanged. Skipping deploy."
+    return
+  fi
+
+  # Sync, not just copy-additive — see install_organicmarket's comment
+  # above for why a removed/renamed file has to disappear on the deployed
+  # side too.
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Ferry System source changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Ferry System deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
 # Lifecycle: install
 # ---------------------------------------------------------------------------
 do_install() {
@@ -1483,6 +1528,7 @@ do_install() {
   apply_engine_patches
   install_playerbots
   install_organicmarket
+  install_ferrysystem
   install_map_editor
   build_modernuo
   fix_felucca_season
@@ -1531,6 +1577,7 @@ do_update() {
   apply_engine_patches
   install_playerbots
   install_organicmarket
+  install_ferrysystem
 
   say "Forcing a rebuild against the updated source..."
   rm -f "${DIST_DIR}/ModernUO.dll"

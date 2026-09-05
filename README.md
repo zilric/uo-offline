@@ -24,6 +24,11 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
   - **Dynamic Arrival Sequences:** Shopper bots arrive via thematic Moongates (linking to a real Britannia city bank), Recall spell effects, or on-foot pathing up to the shop, then depart the same way they came.
   - **Autonomous Appraisal & Purchases:** Bots inspect a vendor's mixed inventory, weigh listed prices against real market baselines, and buy what's reasonably priced - gold is transferred directly into `PlayerVendor.HoldGold`.
   - **Diagnostic Testing (`[spawnbuyer`):** GM command that instantly spawns a forced shopper against a targeted vendor or house, guaranteeing a test purchase for verifying gold flow and arrival effects on demand.
+- **Britannia Maritime Ferry & Charter System (`Scripts/Custom/FerrySystem/`):**
+  - **Connected Coastal & Island Ports:** Permanent charter boats moored at all 13 major ports and remote islands across Britannia - Britain, Trinsic, Vesper, Jhelom, Moonglow, Ocllo, Magincia, Minoc, and Yew on the mainland, plus Dagger Isle, the Isle of the Avatar, the Isle of Fire, and the Skara Brae ferry bank - each crewed by an invulnerable, stationary Charter Captain standing on deck.
+  - **Interactive Charter Gump:** Double-click or speak to any captain to open a two-column destination gump listing every other port with its lore and a distance-scaled fare (50-250gp, checked against backpack gold first, then bank balance).
+  - **Island Integration:** Instant, reliable transit for players and their bonded pets between mainland ports and islands that were previously boat-only or moongate-only, without relying on public moongates.
+  - `[seedferries` / `[wipeferries` GM commands deploy or cleanly remove the entire fleet of boats and captains in one pass.
 
 <details>
 <summary><b>What's new — September 2026</b></summary>
