@@ -2,6 +2,26 @@
 // OrganicMarketDirectoryGump.cs — paged directory of every registered
 // Organic Market house (7 per page), with per-entry Teleport / Restock /
 // Delete actions and Prev/Next paging.
+//
+// SP-048: each row's info line now also shows the house's own type name
+// (OrganicMarketSpawner.HouseTypeName) next to its coordinates, and the
+// nav row gained "<< Prev 10"/"Next 10 >>" buttons alongside the existing
+// single-step Prev/Next, for jumping through a long directory (WorldFrontier
+// Seeder's own 1,500-house target can produce well over 200 pages at 7/page)
+// without clicking through every page in between.
+//
+// SP-049: fixed a real button ID collision the 1,500-house target made
+// live rather than theoretical. Teleport/Restock/Delete/Move Vendor were
+// each `Base + i` with bases only 1,000 apart (1000/2000/3000/4000) - once
+// the registry held more than 1,000 houses, index 1001's Teleport button
+// (1000 + 1001 = 2001) was numerically identical to index 1's Restock
+// button (2000 + 1), so OnResponse's own >= RestockBase check (which runs
+// before >= TeleportBase) dispatched it as a restock instead - exactly
+// the "reports restocking a vendor" symptom this was reported as. Bases
+// are now ActionStride (1,000,000) apart, which stays fully collision-free
+// for any realistic house count (WorldFrontierSeeder's own current ceiling
+// is 1,500) while keeping the exact same Base + index encoding and >=
+// dispatch order that was already correct - just too narrowly spaced.
 // =========================================================================
 
 using System;
@@ -15,13 +35,21 @@ public class OrganicMarketDirectoryGump : DynamicGump
     public override bool Singleton => true;
 
     private const int PerPage = 7;
+    private const int PageJump = 10;
     private const int ButtonBack = 1;
     private const int ButtonPrev = 2;
     private const int ButtonNext = 3;
-    private const int TeleportBase = 1000;
-    private const int RestockBase = 2000;
-    private const int DeleteBase = 3000;
-    private const int MoveVendorBase = 4000;
+    private const int ButtonPrevJump = 4;
+    private const int ButtonNextJump = 5;
+
+    // SP-049: wide enough that TeleportBase + i can never reach RestockBase
+    // (or any higher base) for any house index this server could
+    // realistically ever register - see file header.
+    private const int ActionStride = 1_000_000;
+    private const int TeleportBase = ActionStride;
+    private const int RestockBase = ActionStride * 2;
+    private const int DeleteBase = ActionStride * 3;
+    private const int MoveVendorBase = ActionStride * 4;
 
     private readonly int _page;
 
@@ -55,7 +83,11 @@ public class OrganicMarketDirectoryGump : DynamicGump
         // own clear horizontal slot instead of doubling up into a 2x2
         // grid, and rows grew from 30 to 40px so the two-line
         // info/actions layout below has clean breathing room.
-        const int width = 650;
+        // SP-048: widened again, 650 to 820, for the new house-type-name
+        // column in each row's info line (the longest style name,
+        // "Sandstone House with Patio", needs real room next to the
+        // existing ID/Archetype/Facet/coordinate text).
+        const int width = 820;
         const int rowHeight = 40;
         const int listTop = 90;
         const int navY = listTop + PerPage * rowHeight + 20;
@@ -82,7 +114,7 @@ public class OrganicMarketDirectoryGump : DynamicGump
         // string this shows, stored verbatim at registration time
         // (MerchantGuildAuthority.ArchetypeAt), so there's nothing else to
         // reformat here beyond making sure the column is wide enough.
-        builder.AddHtml(20, 38, width - 40, 20, "<basefont color=#7FFFD4>ID   Archetype             Facet      X, Y, Z</basefont>");
+        builder.AddHtml(20, 38, width - 40, 20, "<basefont color=#7FFFD4>ID   Archetype             Facet      Type                        X, Y, Z</basefont>");
 
         if (total == 0)
         {
@@ -101,8 +133,9 @@ public class OrganicMarketDirectoryGump : DynamicGump
             var archetype = authority.ArchetypeAt(i);
             var facet = alive ? house.Map?.ToString() ?? "?" : "(gone)";
             var loc = alive ? house.Location : Point3D.Zero;
+            var typeName = OrganicMarketSpawner.HouseTypeName(house);
 
-            builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-20} {facet,-9} {loc.X},{loc.Y},{loc.Z}");
+            builder.AddLabel(24, y, alive ? 0x480 : 0x21, $"{id,-4} {archetype,-20} {facet,-9} {typeName,-26} {loc.X},{loc.Y},{loc.Z}");
 
             builder.AddButton(ColTeleport, buttonY, 4005, 4007, TeleportBase + i);
             builder.AddLabel(ColTeleport + 24, buttonY, 0x59, "Teleport");
@@ -133,24 +166,36 @@ public class OrganicMarketDirectoryGump : DynamicGump
             }
         }
 
-        // Anchored together in the bottom-right region rather than
-        // scattered across the row (Prev far left, Back far right, Next
-        // stranded in the middle) - Prev/Next stay in fixed slots even
-        // when one is hidden, so Back never jumps around page to page.
+        // SP-048: << Prev 10 / Next 10 >> sit right next to the existing
+        // single-step Prev/Next, gated on the identical page>0 /
+        // page<pageCount-1 conditions (jumping 10 pages is never valid
+        // exactly when jumping 1 wouldn't be either) - a long directory
+        // (WorldFrontierSeeder's own 1,500-house target can run past 200
+        // pages at 7/page) would otherwise need dozens of single clicks to
+        // cross. OnResponse doesn't need to separately clamp the target
+        // page - DisplayTo's own constructor floors it at 0 and
+        // BuildLayout's page/pageCount Math.Clamp above ceilings it, the
+        // same guarantee the plain Prev/Next buttons already relied on.
         if (page > 0)
         {
-            builder.AddButton(310, navY, 4014, 4016, ButtonPrev);
-            builder.AddLabel(336, navY, 0x480, "< Prev");
+            builder.AddButton(24, navY, 4014, 4016, ButtonPrevJump);
+            builder.AddLabel(50, navY, 0x480, $"<< Prev {PageJump}");
+
+            builder.AddButton(180, navY, 4014, 4016, ButtonPrev);
+            builder.AddLabel(206, navY, 0x480, "< Prev");
         }
 
         if (page < pageCount - 1)
         {
-            builder.AddButton(430, navY, 4005, 4007, ButtonNext);
-            builder.AddLabel(456, navY, 0x480, "Next >");
+            builder.AddButton(320, navY, 4005, 4007, ButtonNext);
+            builder.AddLabel(346, navY, 0x480, "Next >");
+
+            builder.AddButton(440, navY, 4005, 4007, ButtonNextJump);
+            builder.AddLabel(466, navY, 0x480, $"Next {PageJump} >>");
         }
 
-        builder.AddButton(540, navY, 4017, 4019, ButtonBack);
-        builder.AddLabel(566, navY, 0x480, "Back");
+        builder.AddButton(width - 110, navY, 4017, 4019, ButtonBack);
+        builder.AddLabel(width - 84, navY, 0x480, "Back");
     }
 
     public override void OnResponse(NetState sender, in RelayInfo info)
@@ -179,6 +224,18 @@ public class OrganicMarketDirectoryGump : DynamicGump
         if (buttonId == ButtonNext)
         {
             DisplayTo(from, _page + 1);
+            return;
+        }
+
+        if (buttonId == ButtonPrevJump)
+        {
+            DisplayTo(from, _page - PageJump);
+            return;
+        }
+
+        if (buttonId == ButtonNextJump)
+        {
+            DisplayTo(from, _page + PageJump);
             return;
         }
 

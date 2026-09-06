@@ -26,8 +26,7 @@ public class OrganicMarketAdminGump : DynamicGump
     private const int ButtonDirectory = 2;
     private const int ButtonGlobalRestock = 3;
     private const int ButtonWipeAll = 4;
-    private const int ButtonSeedWorld = 5;
-    private const int ButtonSeedInhabitation = 6;
+    private const int ButtonSeedWorldFrontier = 8;
 
     private static readonly MarketHouseStyle[] Styles =
     {
@@ -77,8 +76,15 @@ public class OrganicMarketAdminGump : DynamicGump
         // clips past the background).
         //
         // SP-029: +24px more for the 7th archetype (FisherCurioBaker).
+        // SP-049: -34px - Seed Dagger Isle's own row was removed once
+        // WorldFrontierSeeder's uniform mainland scatter covered Dagger
+        // Isle too (see DaggerIsleSeeder.cs's own removal).
+        // SP-050: -74px - the legacy "Seed World Inhabitation (Filler
+        // Houses)" and "Seed World Crossroads" rows (WorldHouseSeeder.cs)
+        // are both gone now that file itself is deleted, leaving Seed
+        // World (Frontier Density) as the only "seed world" action.
         const int width = 380;
-        const int height = 682;
+        const int height = 642;
         const int radioRowHeight = 24;
 
         builder.AddPage();
@@ -123,20 +129,16 @@ public class OrganicMarketAdminGump : DynamicGump
         builder.AddButton(24, directoryY, 4005, 4007, ButtonDirectory);
         builder.AddLabel(60, directoryY, 0x480, "Open Market House Directory");
 
-        var inhabitationY = directoryY + 34;
-        builder.AddButton(24, inhabitationY, 4005, 4007, ButtonSeedInhabitation);
-        builder.AddLabel(60, inhabitationY, 0x59, "Seed World Inhabitation (Filler Houses)");
+        var frontierY = directoryY + 34;
+        builder.AddButton(24, frontierY, 4005, 4007, ButtonSeedWorldFrontier);
+        builder.AddLabel(60, frontierY, 0x59, "Seed World (Frontier Density)");
 
-        var restockY = inhabitationY + 40;
+        var restockY = frontierY + 40;
         builder.AddHtml(20, restockY - 10, width - 40, 2, "<basefont color=#555555>________________________________</basefont>");
         builder.AddButton(24, restockY + 16, 4005, 4007, ButtonGlobalRestock);
         builder.AddLabel(60, restockY + 16, 0x44, "Force Global Restock (all vendors)");
 
-        var seedY = restockY + 56;
-        builder.AddButton(24, seedY, 4005, 4007, ButtonSeedWorld);
-        builder.AddLabel(60, seedY, 0x59, "Seed World Crossroads");
-
-        var wipeY = seedY + 40;
+        var wipeY = restockY + 56;
         builder.AddButton(24, wipeY, 4017, 4019, ButtonWipeAll);
         builder.AddLabel(60, wipeY, 0x25, "Wipe All Market Houses");
     }
@@ -177,20 +179,9 @@ public class OrganicMarketAdminGump : DynamicGump
                 OrganicMarketWipeConfirmGump.DisplayTo(from);
                 break;
 
-            case ButtonSeedWorld:
-                // Fire-and-forget: places one node every ~75ms via Timer so
-                // packet output spreads across seconds instead of bursting
-                // all at once (see WorldHouseSeeder's file header) - the
-                // "seeded X/Total" summary arrives as its own message once
-                // the last node's tick runs, not synchronously here.
-                from.SendMessage("OrganicMarket: seeding trade corridor houses...");
-                WorldHouseSeeder.SeedAll(from);
-                DisplayTo(from);
-                break;
-
-            case ButtonSeedInhabitation:
-                from.SendMessage("OrganicMarket: seeding world inhabitation across Britannia...");
-                WorldHouseSeeder.SeedInhabitation(from);
+            case ButtonSeedWorldFrontier:
+                from.SendMessage("OrganicMarket: seeding frontier-density houses across the mainland...");
+                WorldFrontierSeeder.Seed(from);
                 DisplayTo(from);
                 break;
         }

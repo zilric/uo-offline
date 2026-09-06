@@ -75,6 +75,41 @@ public static class OrganicMarketSpawner
         _                                  => archetype.ToString()
     };
 
+    // SP-048: every MarketHouseStyle value, cached once for HouseTypeName's
+    // own reverse lookup below rather than calling Enum.GetValues per row
+    // every time the directory gump renders a page.
+    private static readonly MarketHouseStyle[] AllHouseStyles =
+        (MarketHouseStyle[])Enum.GetValues(typeof(MarketHouseStyle));
+
+    // SP-048: OrganicMarketDirectoryGump shows this next to each house's
+    // coordinates. MerchantGuildAuthority's registry tracks archetype per
+    // house slot but never style, so this derives it from the house
+    // itself instead: BuildHouse always constructs a house with
+    // MultiId(style) as its own Item.ItemID (a BaseMulti's ItemID IS its
+    // multi ID - the same fact HasFootprintConflict's own multiId
+    // parameter relies on), so matching a live house's ItemID back against
+    // MultiId(style) for every style is a reliable reverse lookup, not a
+    // guess. Falls back to the house's own real class name for anything
+    // this catalog didn't place (a genuine player house, or a future style
+    // not yet mapped here) rather than showing nothing.
+    public static string HouseTypeName(BaseHouse house)
+    {
+        if (house?.Deleted != false)
+        {
+            return "(gone)";
+        }
+
+        foreach (var style in AllHouseStyles)
+        {
+            if (MultiId(style) == house.ItemID)
+            {
+                return StyleName(style);
+            }
+        }
+
+        return house.GetType().Name;
+    }
+
     // SP-030: the reverse of ArchetypeName - MerchantGuildAuthority's
     // registry only stores the friendly display string per house slot
     // (Register's own `string archetype` param), so a dynamic restock
@@ -408,8 +443,17 @@ public static class OrganicMarketSpawner
     // a search candidate for the seeder) and, for the interactive path,
     // its own region-specific failure messaging, so it isn't folded in
     // here.
+    //
+    // SP-044: sideBuffer/frontBackBuffer default to the mainland's own
+    // HousePlacementConfig constants, but a regional seeder (Dagger Isle's
+    // own DaggerIsleSeeder, tighter at 2/4) can pass its own values
+    // through to HasFootprintConflict without touching those shared
+    // constants or affecting any other caller (MarketHousePlacementTarget,
+    // WorldHouseSeeder) that doesn't pass them.
     public static HousePlacementResult CheckPlacement(
-        Map map, Point3D center, MarketHouseStyle style, out List<IEntity> toMove
+        Map map, Point3D center, MarketHouseStyle style, out List<IEntity> toMove,
+        int sideBuffer = HousePlacementConfig.SideToSideBuffer,
+        int frontBackBuffer = HousePlacementConfig.FrontToBackBuffer
     )
     {
         toMove = null;
@@ -436,7 +480,7 @@ public static class OrganicMarketSpawner
             authority.Map = savedMap;
         }
 
-        if (result == HousePlacementResult.Valid && HasFootprintConflict(map, center, multiId))
+        if (result == HousePlacementResult.Valid && HasFootprintConflict(map, center, multiId, sideBuffer, frontBackBuffer))
         {
             toMove = null;
             return HousePlacementResult.BadStatic;
@@ -494,13 +538,13 @@ public static class OrganicMarketSpawner
     // choking off the ground a south-facing front door needs to actually
     // be approached. See that file's own header for why every classic
     // house style in this catalog maps X to "side" and Y to "front/back."
-    private static bool HasFootprintConflict(Map map, Point3D center, int multiId)
+    private static bool HasFootprintConflict(Map map, Point3D center, int multiId, int sideBuffer, int frontBackBuffer)
     {
         var mcl = MultiData.GetComponents(multiId);
-        var startX = center.X + mcl.Min.X - HousePlacementConfig.SideToSideBuffer;
-        var startY = center.Y + mcl.Min.Y - HousePlacementConfig.FrontToBackBuffer;
-        var endX = center.X + mcl.Min.X + mcl.Width + HousePlacementConfig.SideToSideBuffer;
-        var endY = center.Y + mcl.Min.Y + mcl.Height + HousePlacementConfig.FrontToBackBuffer;
+        var startX = center.X + mcl.Min.X - sideBuffer;
+        var startY = center.Y + mcl.Min.Y - frontBackBuffer;
+        var endX = center.X + mcl.Min.X + mcl.Width + sideBuffer;
+        var endY = center.Y + mcl.Min.Y + mcl.Height + frontBackBuffer;
 
         for (var x = startX; x < endX; x++)
         {
