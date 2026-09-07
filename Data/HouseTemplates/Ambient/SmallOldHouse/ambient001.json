@@ -1,0 +1,115 @@
+{
+  "HouseTypeName": "SmallOldHouse",
+  "Items": [
+    {
+      "Dx": -2,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2868,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -1,
+      "Dz": 11,
+      "ItemId": 3650,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2083,
+      "Dy": -655,
+      "Dz": 0,
+      "ItemId": 4110,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -1,
+      "Dz": 7,
+      "ItemId": 3650,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2105,
+      "Dy": -663,
+      "Dz": 0,
+      "ItemId": 4110,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -1,
+      "Dz": 7,
+      "ItemId": 2869,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2862,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 1,
+      "Dz": 7,
+      "ItemId": 4017,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": true
+    },
+    {
+      "Dx": -2,
+      "Dy": 0,
+      "Dz": 7,
+      "ItemId": 4015,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": true
+    },
+    {
+      "Dx": 0,
+      "Dy": 0,
+      "Dz": 7,
+      "ItemId": 3703,
+      "Hue": 946,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    }
+  ]
+}

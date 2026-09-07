@@ -1,10 +1,21 @@
 // =========================================================================
-// HouseDecorCommands.cs — SP-043/SP-044: [exportdecor <optional_name> and
-// [importdecor. Both target a house sign (or, failing that, anything else
-// sitting inside the house — BaseHouse.FindHouseAt infers it) and operate
-// on that house's own decorative clutter, using HouseTemplateRegistry
-// (footprint categorization + Data/HouseTemplates/<Category>/*.json
-// storage) underneath.
+// HouseDecorCommands.cs — SP-043/SP-044: originally also home to
+// [exportdecor/[importdecor and the footprint-category-keyed template
+// registry/picker gump. SP-055 replaced both commands outright with
+// Scripts/Custom/OrganicMarket/ExportHouseCommand.cs/ImportHouseCommand.cs
+// (classified by Ambient/Vendor+Archetype and stored under
+// Data/HouseTemplates/, with small-house cross-style compatibility - see
+// HouseTemplateManager.cs's own header) and removed
+// HouseTemplateRegistry.cs/HouseDecorGump.cs entirely, since nothing else
+// referenced them (confirmed via full-repo grep before deletion).
+//
+// This file survives only for CollectDecorItems/ClearDecor: the actual
+// "scan a house for its decor"/"wipe it" primitives, which
+// HouseTemplateManager.cs and AmbientHousePurchaseGump.cs both still call
+// into directly - cross-namespace calls from Scripts/Custom/OrganicMarket/
+// into Scripts/Custom/Housing/ were already an established, working
+// pattern before this refactor and remain the correct way to reuse this
+// logic rather than duplicating it.
 //
 // SP-044: "decorative clutter" is no longer just house.LockDowns.
 // Verified against real content: Anvil/Forge (Items/Skill Items/Blacksmith
@@ -26,12 +37,9 @@
 // list, since the spatial sweep would otherwise happily pick them up too.
 // =========================================================================
 
-using System;
 using System.Collections.Generic;
-using Server.Commands;
 using Server.Items;
 using Server.Multis;
-using Server.Targeting;
 
 namespace Server.Engines.Housing;
 
@@ -151,9 +159,10 @@ public static class HouseDecorCommands
     // BaseAddon.OnChop already relies on), plus everything
     // CollectDecorItems finds (LockDowns and stray immovable props; any
     // addon component already went with its parent above, so this pass
-    // only ever deletes what's left). Shared by [importdecor's own
-    // pre-placement clear and AmbientHousePurchaseGump's Purchase Vacant
-    // path, so both describe "vacant" identically.
+    // only ever deletes what's left). Shared by ExportHouseGump's/
+    // ImportHouseGump's own pre-placement clear and
+    // AmbientHousePurchaseGump's unconditional purchase-time wipe, so
+    // every caller describes "vacant" identically.
     public static void ClearDecor(BaseHouse house)
     {
         foreach (var addonItem in new List<Item>(house.Addons))
@@ -173,203 +182,5 @@ public static class HouseDecorCommands
                 item.Delete();
             }
         }
-    }
-
-    public static void Configure()
-    {
-        CommandSystem.Register("exportdecor", AccessLevel.GameMaster, OnExportDecor);
-        CommandSystem.Register("importdecor", AccessLevel.GameMaster, OnImportDecor);
-    }
-
-    // Accepts a house sign directly (the common case), the house item
-    // itself, or anything else (a chair, a wall) sitting inside one —
-    // BaseHouse.FindHouseAt is the same "infer the house" lookup the core
-    // engine uses for things like OnLogin's ban-location check.
-    private static BaseHouse ResolveHouse(object targeted) => targeted switch
-    {
-        HouseSign sign => sign.Owner,
-        BaseHouse house => house,
-        Item item => BaseHouse.FindHouseAt(item),
-        Mobile mobile => BaseHouse.FindHouseAt(mobile),
-        _ => null
-    };
-
-    [Usage("exportdecor <name>")]
-    [Description("Target a house sign (or anything inside a house) to export its decorative clutter as a reusable JSON blueprint. <name> is optional.")]
-    private static void OnExportDecor(CommandEventArgs e)
-    {
-        var name = e.Length > 0 ? e.GetString(0) : null;
-        var from = e.Mobile;
-        from?.SendMessage("Target a house sign (or something inside a house) to export its decor.");
-        from.Target = new ExportDecorTarget(name);
-    }
-
-    private class ExportDecorTarget : Target
-    {
-        private readonly string _requestedName;
-
-        public ExportDecorTarget(string requestedName) : base(-1, false, TargetFlags.None) =>
-            _requestedName = requestedName;
-
-        protected override void OnTarget(Mobile from, object o)
-        {
-            var house = ResolveHouse(o);
-            if (house?.Deleted != false)
-            {
-                from.SendMessage("That is not a house sign, or not something inside a house.");
-                return;
-            }
-
-            var category = HouseTemplateRegistry.CategoryOf(house);
-            if (category == HouseFootprintCategory.Unknown)
-            {
-                from.SendMessage(0x22, $"[ExportDecor] {house.GetType().Name} isn't a recognized footprint category — nothing exported.");
-                return;
-            }
-
-            var template = new DecorTemplate { HouseTypeName = house.GetType().Name };
-
-            foreach (var (item, isAddon) in CollectDecorItems(house))
-            {
-                template.Items.Add(new DecorItemRecord
-                {
-                    Dx = item.X - house.X,
-                    Dy = item.Y - house.Y,
-                    Dz = item.Z - house.Z,
-                    ItemId = item.ItemID,
-                    Hue = item.Hue,
-                    Name = item.Name,
-                    Movable = item.Movable,
-                    IsAddon = isAddon
-                });
-            }
-
-            var templateName = SanitizeFileName(
-                string.IsNullOrWhiteSpace(_requestedName)
-                    ? $"{category}-{Core.Now:yyyyMMdd-HHmmss}"
-                    : _requestedName
-            );
-
-            HouseTemplateRegistry.SaveTemplate(category, templateName, template);
-            var path = HouseTemplateRegistry.TemplatePath(category, templateName);
-
-            from.SendMessage(0x59, $"[ExportDecor] Saved {template.Items.Count} item(s) from this {category} house to {path}.");
-        }
-    }
-
-    [Usage("importdecor")]
-    [Description("Target a house sign (or anything inside a house) to open a list of compatible saved decor blueprints and apply one.")]
-    private static void OnImportDecor(CommandEventArgs e)
-    {
-        var from = e.Mobile;
-        from?.SendMessage("Target a house sign (or something inside a house) to import decor into.");
-        from.Target = new ImportDecorTarget();
-    }
-
-    private class ImportDecorTarget : Target
-    {
-        public ImportDecorTarget() : base(-1, false, TargetFlags.None)
-        {
-        }
-
-        protected override void OnTarget(Mobile from, object o)
-        {
-            var house = ResolveHouse(o);
-            if (house?.Deleted != false)
-            {
-                from.SendMessage("That is not a house sign, or not something inside a house.");
-                return;
-            }
-
-            var category = HouseTemplateRegistry.CategoryOf(house);
-            if (category == HouseFootprintCategory.Unknown)
-            {
-                from.SendMessage(0x22, $"[ImportDecor] {house.GetType().Name} isn't a recognized footprint category.");
-                return;
-            }
-
-            var templates = HouseTemplateRegistry.ListTemplates(category);
-            if (templates.Count == 0)
-            {
-                from.SendMessage(0x22, $"[ImportDecor] No saved blueprints exist yet for the {category} category.");
-                return;
-            }
-
-            HouseDecorGump.DisplayTo(from, house, category, templates);
-        }
-    }
-
-    // Shared by HouseDecorGump's own selection button — the gump only
-    // handles listing/picking, the actual clear-and-place operation lives
-    // here so it's reachable (and testable) the same way
-    // AmbientHousePurchaseGump.TryPurchase's logic is split from its gump.
-    public static void ApplyTemplate(Mobile from, BaseHouse house, HouseFootprintCategory category, string templateName)
-    {
-        if (house?.Deleted != false)
-        {
-            from?.SendMessage("That house is no longer available.");
-            return;
-        }
-
-        var template = HouseTemplateRegistry.LoadTemplate(category, templateName);
-        if (template == null)
-        {
-            from?.SendMessage(0x22, $"[ImportDecor] Could not load blueprint '{templateName}'.");
-            return;
-        }
-
-        // Clear existing decorative clutter first — LockDowns, every
-        // placed addon, and any stray immovable prop alike (see
-        // ClearDecor's own header).
-        ClearDecor(house);
-
-        var placed = 0;
-        foreach (var record in template.Items)
-        {
-            var item = new Item(record.ItemId) { Hue = record.Hue };
-            if (!string.IsNullOrEmpty(record.Name))
-            {
-                item.Name = record.Name;
-            }
-
-            item.MoveToWorld(new Point3D(house.X + record.Dx, house.Y + record.Dy, house.Z + record.Dz), house.Map);
-
-            // house.Owner always satisfies IsCoOwner (IsOwner(m) is true
-            // for m == Owner) whether the house still belongs to
-            // MerchantGuildAuthority or a real player, so this locks down
-            // correctly either way. checkIsInside: false matches
-            // DynamicClutterGenerator's own convention — these offsets
-            // are already known-good for this footprint category.
-            if (house.LockDown(house.Owner, item, false))
-            {
-                placed++;
-            }
-
-            // A LockDown refusal (house lockdown/storage cap already
-            // full) leaves the item exactly where it landed, movable and
-            // unlocked, rather than forcing an inconsistent "immovable
-            // but not tracked as a fixture" state — the honest partial
-            // count below tells the GM capacity ran out.
-        }
-
-        from?.SendMessage(
-            0x59,
-            $"[ImportDecor] Placed {placed}/{template.Items.Count} item(s) from '{templateName}' into this house."
-        );
-    }
-
-    // GM-supplied template names become file names — strip anything that
-    // isn't safe across the filesystems this server might run on.
-    private static string SanitizeFileName(string name)
-    {
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
-        Span<char> buffer = stackalloc char[name.Length];
-        for (var i = 0; i < name.Length; i++)
-        {
-            var c = name[i];
-            buffer[i] = Array.IndexOf(invalid, c) >= 0 ? '_' : c;
-        }
-
-        return new string(buffer);
     }
 }

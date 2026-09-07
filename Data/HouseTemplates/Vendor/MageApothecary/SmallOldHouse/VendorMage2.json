@@ -1,0 +1,126 @@
+{
+  "HouseTypeName": "SmallOldHouse",
+  "Items": [
+    {
+      "Dx": -2,
+      "Dy": -2,
+      "Dz": 13,
+      "ItemId": 4167,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2869,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 0,
+      "Dz": 19,
+      "ItemId": 6217,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2866,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -1,
+      "Dz": 7,
+      "ItemId": 3761,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 1,
+      "Dz": 10,
+      "ItemId": 6226,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -1,
+      "Dz": 7,
+      "ItemId": 2889,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -1,
+      "Dz": 12,
+      "ItemId": 3834,
+      "Hue": 1121,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -1,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2474,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 0,
+      "Dz": 7,
+      "ItemId": 2718,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 1,
+      "Dz": 7,
+      "ItemId": 3645,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    }
+  ]
+}

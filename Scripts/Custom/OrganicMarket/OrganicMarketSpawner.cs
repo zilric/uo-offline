@@ -171,26 +171,6 @@ public static class OrganicMarketSpawner
     public static int GetPurchasePrice(MarketHouseStyle style) =>
         (int)(Math.Round(GetBaseDeedPrice(style) * 1.10 / 1000.0) * 1000);
 
-    // SP-043: the "Purchase Furnished" surcharge on top of GetPurchasePrice
-    // — a flat per-item fee (the ticket's own suggested default) rather
-    // than summing each item's own base value, since ambient decor is
-    // generic furniture/clutter with no meaningfully distinct per-item
-    // price data to sum in the first place.
-    //
-    // SP-044: counts Housing.HouseDecorCommands.CollectDecorItems, not a
-    // bare house.LockDowns.Count — a house's own addons (their real,
-    // visible Components) and stray non-movable props that were never
-    // lockdown-eligible to begin with (Anvil/Forge — plain Items that
-    // construct themselves Movable = false, so BaseHouse.LockDown's own
-    // gate can never register them; see HouseDecorCommands' own header)
-    // are real decor a buyer is paying to keep furnished just as much as
-    // an ordinary locked-down chair is, and undercounting them here would
-    // let a Furnished purchase keep more than it actually charged for.
-    public const int FurnishingFeePerItem = 75;
-
-    public static int GetFurnishingFee(BaseHouse house) =>
-        house?.Deleted != false ? 0 : HouseDecorCommands.CollectDecorItems(house).Count * FurnishingFeePerItem;
-
     // The real house multi ID and deed placement offset for each style —
     // same values the stock house deeds use (Multis/Deeds.cs), so the
     // MultiTarget ghost outline and HousePlacement.Check both line up
@@ -354,7 +334,18 @@ public static class OrganicMarketSpawner
             // anchor tile returned here needs to already be reserved
             // (DynamicClutterGenerator.Furnish itself seeds it into the
             // wall-fixture pass's own placed-tile list).
-            var anchor = DynamicClutterGenerator.Furnish(house, style, a, authority);
+            //
+            // SP-054: a curated GM template (HouseTemplateManager) takes
+            // priority over the procedural pass when one exists for this
+            // archetype/house type - SpawnVendors below already has a
+            // complete fallback for a null anchor (InteriorTileFinder.
+            // TryFindVendorSpots for every vendor slot, not just the
+            // primary), so skipping Furnish entirely here is safe rather
+            // than risking curated and procedural decor visually
+            // colliding by running both.
+            (Point3D Spot, Direction Facing)? anchor = HouseTemplateManager.TryStamp(house, a, authority)
+                ? null
+                : DynamicClutterGenerator.Furnish(house, style, a, authority);
 
             // SP-028: 2-4 vendors, all under the same archetype, per shop
             // - see VendorCountFor. MerchantGuildAuthority.Register still
@@ -376,7 +367,16 @@ public static class OrganicMarketSpawner
             // lives here" read), residential clutter instead of a
             // merchant's craft station, and no PlayerVendor at all.
             house.Public = false;
-            DynamicClutterGenerator.FurnishResidential(house, authority);
+
+            // SP-054: same either/or precedence as the vendor branch above
+            // - a curated ambient template, if one exists for this house
+            // type, replaces the procedural residential-furniture pass
+            // entirely rather than supplementing it.
+            if (!HouseTemplateManager.TryStamp(house, null, authority))
+            {
+                DynamicClutterGenerator.FurnishResidential(house, authority);
+            }
+
             authority.Register(house, AmbientResidenceArchetype, null);
 
             // SP-026: swap the stock sign BaseHouse's own constructor

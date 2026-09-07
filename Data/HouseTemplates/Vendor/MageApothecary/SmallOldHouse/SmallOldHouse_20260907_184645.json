@@ -1,0 +1,115 @@
+{
+  "HouseTypeName": "SmallOldHouse",
+  "Items": [
+    {
+      "Dx": -2,
+      "Dy": 0,
+      "Dz": 7,
+      "ItemId": 2867,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": 1,
+      "Dz": 7,
+      "ItemId": 4167,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -2,
+      "Dz": 13,
+      "ItemId": 6226,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 0,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2869,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -1,
+      "Dy": 0,
+      "Dz": 7,
+      "ItemId": 2892,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": -1,
+      "Dy": 0,
+      "Dz": 12,
+      "ItemId": 6217,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": true,
+      "IsAddon": false
+    },
+    {
+      "Dx": 2,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 3651,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    },
+    {
+      "Dx": 1,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 3651,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    },
+    {
+      "Dx": -1,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2637,
+      "Hue": 0,
+      "Name": null,
+      "Movable": true,
+      "Locked": false,
+      "IsAddon": false
+    },
+    {
+      "Dx": -2,
+      "Dy": -2,
+      "Dz": 7,
+      "ItemId": 2637,
+      "Hue": 0,
+      "Name": null,
+      "Movable": false,
+      "Locked": false,
+      "IsAddon": false
+    }
+  ]
+}

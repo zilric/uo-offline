@@ -5,27 +5,27 @@
 // OrganicMarketWipeConfirmGump, but a confirmed purchase transfers real
 // ownership instead of deleting anything.
 //
-// SP-043: now a three-button choice instead of a single Buy/Cancel pair —
-// Purchase Vacant (base price, strips every locked-down decor item, same
-// behavior this gump always had) or Purchase Furnished (base price + a
-// flat per-item surcharge, keeps every locked-down item in place). Keeping
-// them is sufficient on its own: BaseHouse lockdown capacity/ownership is
-// tracked per-HOUSE, not per-account (see SetLockdown/CheckAosLockdowns,
-// Multis/Houses/BaseHouse.cs) — nothing about an existing LockDowns entry
-// references which Mobile locked it down, so the instant house.Owner
-// below flips to the buyer, those items are simply the new owner's own
-// fixtures. No per-item re-locking is needed or possible to do more
-// correctly than that.
+// SP-054: back to a single Buy/Cancel pair - the SP-043/044 "Purchase
+// Furnished" choice (base price + a flat per-item surcharge to keep every
+// locked-down item) is gone. All market/template decor (whether from
+// DynamicClutterGenerator's procedural pass or a HouseTemplateManager-
+// stamped curated template - both indistinguishable at purchase time,
+// which is fine: nothing a buyer hasn't owned yet could contain anything
+// BUT market/template decor) is unconditionally stripped the instant
+// ownership transfers, with no prompt offering to keep it. TryPurchase no
+// longer takes a keepFurnishings parameter - confirmed via full-repo grep
+// that OnResponse below was its only caller, so this is a safe, non-
+// breaking signature simplification, not just an internal behavior
+// change.
 //
-// SP-044: Vacant's own strip loop and GetFurnishingFee's own count both
-// route through Housing.HouseDecorCommands.ClearDecor/CollectDecorItems
-// now, not a bare house.LockDowns walk — a house's own addons (a real
-// water trough, say) and stray non-movable props that were never
+// Decor scanning/clearing routes through Housing.HouseDecorCommands.
+// ClearDecor, not a bare house.LockDowns walk — a house's own addons (a
+// real water trough, say) and stray non-movable props that were never
 // lockdown-eligible in the first place (Anvil/Forge — see
 // HouseDecorCommands' own header for why LockDowns was never the
 // complete picture) need the exact same treatment here that
-// [exportdecor/[importdecor already learned to give them, or Vacant would
-// leave an addon standing and Furnished would undercharge for one.
+// [exporthouse/[importhouse (HouseTemplateManager.cs) already learned to
+// give them.
 // =========================================================================
 
 using Server;
@@ -42,9 +42,8 @@ public class AmbientHousePurchaseGump : DynamicGump
 {
     public override bool Singleton => true;
 
-    private const int ButtonBuyVacant = 1;
+    private const int ButtonBuy = 1;
     private const int ButtonCancel = 2;
-    private const int ButtonBuyFurnished = 3;
 
     private readonly BaseHouse _house;
     private readonly MarketHouseStyle _style;
@@ -68,12 +67,10 @@ public class AmbientHousePurchaseGump : DynamicGump
     protected override void BuildLayout(ref DynamicGumpBuilder builder)
     {
         const int width = 420;
-        const int height = 290;
+        const int height = 230;
 
         var basePrice = OrganicMarketSpawner.GetBaseDeedPrice(_style);
         var purchasePrice = OrganicMarketSpawner.GetPurchasePrice(_style);
-        var furnishingFee = OrganicMarketSpawner.GetFurnishingFee(_house);
-        var furnishedPrice = purchasePrice + furnishingFee;
         var itemCount = _house?.Deleted == false ? HouseDecorCommands.CollectDecorItems(_house).Count : 0;
 
         builder.AddPage();
@@ -83,29 +80,19 @@ public class AmbientHousePurchaseGump : DynamicGump
         builder.AddHtml(20, 20, width - 40, 20, "<center><basefont color=#FFD700>This House is For Sale</basefont></center>");
 
         builder.AddHtml(
-            20, 50, width - 40, 80,
+            20, 50, width - 40, 100,
             $"<basefont color=#FFFFFF>Style: {OrganicMarketSpawner.StyleName(_style)}<br>" +
             $"Base deed valuation: {basePrice:N0} gp<br>" +
-            $"This house currently has {itemCount} decorative item(s) inside.<br><br>" +
+            $"This house currently has {itemCount} decorative item(s) inside, which will be cleared before you take ownership.<br><br>" +
             "Gold is withdrawn from your backpack first, then your bank.</basefont>"
         );
 
         builder.AddHtml(
-            20, 130, width - 40, 40,
-            $"<basefont color=#88FF88>Purchase Vacant: {purchasePrice:N0} gp</basefont><br>" +
-            "<basefont color=#AAAAAA>Clears out all decor before you take ownership.</basefont>"
+            20, 152, width - 40, 20,
+            $"<basefont color=#88FF88>Purchase: {purchasePrice:N0} gp</basefont>"
         );
-        builder.AddButton(30, height - 90, 4017, 4019, ButtonBuyVacant);
-        builder.AddLabel(66, height - 90, 0x59, "Buy Vacant");
-
-        builder.AddHtml(
-            20, 178, width - 40, 40,
-            $"<basefont color=#88CCFF>Purchase Furnished: {furnishedPrice:N0} gp</basefont> " +
-            $"<basefont color=#777777>(+{furnishingFee:N0} gp for {itemCount} item(s))</basefont><br>" +
-            "<basefont color=#AAAAAA>Keeps every decor item, already locked down as yours.</basefont>"
-        );
-        builder.AddButton(30, height - 50, 4017, 4019, ButtonBuyFurnished);
-        builder.AddLabel(66, height - 50, 0x59, "Buy Furnished");
+        builder.AddButton(30, height - 40, 4017, 4019, ButtonBuy);
+        builder.AddLabel(66, height - 40, 0x59, "Buy");
 
         builder.AddButton(width - 110, height - 40, 4005, 4007, ButtonCancel);
         builder.AddLabel(width - 74, height - 40, 0x480, "Cancel");
@@ -119,14 +106,9 @@ public class AmbientHousePurchaseGump : DynamicGump
             return;
         }
 
-        switch (info.ButtonID)
+        if (info.ButtonID == ButtonBuy)
         {
-            case ButtonBuyVacant:
-                TryPurchase(from, _house, _style, keepFurnishings: false);
-                break;
-            case ButtonBuyFurnished:
-                TryPurchase(from, _house, _style, keepFurnishings: true);
-                break;
+            TryPurchase(from, _house, _style);
         }
     }
 
@@ -134,12 +116,7 @@ public class AmbientHousePurchaseGump : DynamicGump
     // testable) without a live client round-trip through the gump -
     // AmbientHouseSign.OnDoubleClick's own DisplayTo/OnResponse path is
     // just the normal player-facing entry point into the same method.
-    //
-    // keepFurnishings selects Purchase Furnished (base price + a flat
-    // per-item surcharge, decor stays) over Purchase Vacant (base price
-    // only, decor is stripped — the sole behavior this method had before
-    // SP-043).
-    public static bool TryPurchase(Mobile from, BaseHouse house, MarketHouseStyle style, bool keepFurnishings)
+    public static bool TryPurchase(Mobile from, BaseHouse house, MarketHouseStyle style)
     {
         var authority = MerchantGuildAuthority.Instance;
 
@@ -163,10 +140,6 @@ public class AmbientHousePurchaseGump : DynamicGump
         }
 
         var price = OrganicMarketSpawner.GetPurchasePrice(style);
-        if (keepFurnishings)
-        {
-            price += OrganicMarketSpawner.GetFurnishingFee(house);
-        }
 
         // SP-043: checks (and, on success, spends from) the backpack
         // before the bank, rather than Banker.GetBalance/Withdraw's own
@@ -201,24 +174,13 @@ public class AmbientHousePurchaseGump : DynamicGump
         house.LastTraded = Core.Now;
         house.RestrictDecay = false;
 
-        // SP-034/SP-044: strip every ambient decor item before handing the
-        // house over, UNLESS the buyer paid the Furnished surcharge to
-        // keep it - LockDowns, addons (a real water trough, say - Delete()
-        // on the addon root cascades to its own Components), and any
-        // stray non-movable prop that was never lockdown-eligible to
-        // begin with (Anvil/Forge - see HouseDecorCommands' own header).
-        // DynamicClutterGenerator/FurnishResidential locked ordinary
-        // clutter down under `authority`, not the buyer, but a lockdown's
-        // ownership is entirely implicit in which house it's IN - nothing
-        // on the item itself remembers which Mobile locked it down (see
-        // BaseHouse.SetLockdown) - so the house.Owner assignment above is
-        // already all "converts decorative clutter to the buyer's own
-        // locked-down items" requires when keeping them; there is nothing
-        // more correct left to do per-item.
-        if (!keepFurnishings)
-        {
-            HouseDecorCommands.ClearDecor(house);
-        }
+        // SP-054: unconditionally strip every market/template decor item
+        // before handing the house over - no prompt, no "keep it" choice.
+        // LockDowns, addons (a real water trough, say - Delete() on the
+        // addon root cascades to its own Components), and any stray non-
+        // movable prop that was never lockdown-eligible to begin with
+        // (Anvil/Forge - see HouseDecorCommands' own header) all go.
+        HouseDecorCommands.ClearDecor(house);
 
         // Crucial: pull this slot out of the registry so [Wipe All Market
         // Houses] can never touch it again.
@@ -239,8 +201,7 @@ public class AmbientHousePurchaseGump : DynamicGump
         house.Sign = newSign;
 
         from.SendMessage(
-            $"You have purchased this {OrganicMarketSpawner.StyleName(style)} " +
-            $"({(keepFurnishings ? "furnished" : "vacant")}) for {price:N0} gold."
+            $"You have purchased this {OrganicMarketSpawner.StyleName(style)} for {price:N0} gold."
         );
         return true;
     }

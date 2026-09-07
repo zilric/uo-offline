@@ -93,11 +93,11 @@ public static class CommandPanelRegistry
         Register(PanelCategory.OrganicMarket, "verbose", "Open the verbose logging manager", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.OrganicMarket, "sendhome", "Send a resident home (target bot then sign, or sign only)", AccessLevel.GameMaster, requiresArgs: true);
         Register(PanelCategory.OrganicMarket, "leavehome", "Check out a homeowner bot (target bot or its house sign)", AccessLevel.GameMaster, requiresArgs: true);
-        Register(PanelCategory.OrganicMarket, "exportdecor", "Export a house's decor as a reusable JSON blueprint", AccessLevel.GameMaster, requiresArgs: true);
-        Register(PanelCategory.OrganicMarket, "importdecor", "Apply a saved decor blueprint to a compatible house", AccessLevel.GameMaster, requiresArgs: true);
         Register(PanelCategory.OrganicMarket, "seedworldfrontier", "Fast-batched frontier-density house/vendor seeding across the mainland", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.OrganicMarket, "seedtransitvendors", "Fast-batched compact-shop seeding around moongates (70% vendor) and roads (25% vendor)", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.OrganicMarket, "regridvendor", "Target a vendor and re-arrange its sale containers into a grid", AccessLevel.GameMaster, requiresArgs: true);
+        Register(PanelCategory.OrganicMarket, "exporthouse", "Target a house to classify and export its decor as a curated seeder template", AccessLevel.GameMaster, requiresArgs: true);
+        Register(PanelCategory.OrganicMarket, "importhouse", "Target a house to browse and stamp a curated decor template onto it", AccessLevel.GameMaster, requiresArgs: true);
 
         // --- PlayerBots --- (CustomBots/)
         Register(PanelCategory.PlayerBots, "SpawnBot", "Spawn one bot of a class/tier here (needs args)", AccessLevel.GameMaster, requiresArgs: true);

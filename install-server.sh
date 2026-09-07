@@ -1417,6 +1417,36 @@ install_playerbots() {
 }
 
 # ---------------------------------------------------------------------------
+# Curated house-decor templates ([exporthouse/[importhouse,
+# Scripts/Custom/OrganicMarket/HouseTemplateManager.cs). Data/HouseTemplates/
+# at the repo root is the tracked source of truth - server-runtime/ModernUO/
+# is its own separate git clone (confirmed: has its own .git/ and remote),
+# so anything a GM exports directly into the deployed tree can never be
+# committed from there; this directory is the one meant to be manually
+# curated back into the repo and shipped from here instead. Deploys the
+# same way playerbots/data/'s own sub-directories do - a whole-directory
+# mirror copy, so a fresh install/update always ships every template
+# already checked into the repo. One-way only (repo -> deployed): a
+# template a GM exports live in a running server isn't automatically
+# written back here.
+# ---------------------------------------------------------------------------
+install_house_templates() {
+  banner "Installing curated house templates"
+
+  local src_dir="${SCRIPT_DIR}/Data/HouseTemplates"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Data/HouseTemplates/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  say "Deploying HouseTemplates -> ${DIST_DIR}/Data/HouseTemplates"
+  mkdir -p "${DIST_DIR}/Data/HouseTemplates"
+  cp -rT "${src_dir}" "${DIST_DIR}/Data/HouseTemplates"
+
+  ok "Curated house templates deployed"
+}
+
+# ---------------------------------------------------------------------------
 # Organic Market admin tool: deploy Scripts/Custom/OrganicMarket/ into the
 # ModernUO source tree. The path is a straight copy under Projects/UOContent/
 # (an SDK-style csproj compiles any .cs file under its own directory by
@@ -1733,6 +1763,7 @@ do_install() {
   bootstrap_dotnet
   apply_engine_patches
   install_playerbots
+  install_house_templates
   install_organicmarket
   install_ferrysystem
   install_commandpanel
@@ -1787,6 +1818,7 @@ do_update() {
   bootstrap_dotnet
   apply_engine_patches
   install_playerbots
+  install_house_templates
   install_organicmarket
   install_ferrysystem
   install_commandpanel
