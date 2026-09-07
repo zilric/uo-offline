@@ -27,13 +27,35 @@
 // deploy-location choice per the ticket's folder restriction, not a
 // change to which namespace behaviors actually live in.
 //
-// Note: this behavior is intentionally NOT registered in the core
-// BehaviorRegistry (that file lives outside Scripts/Custom/ and is out of
-// this ticket's scope) — so its SerializableName won't round-trip through
-// a world save/load. That's an acceptable gap: BotStartupManager purges
-// and respawns the entire PlayerBot population on every normal boot
-// already, so no bot's Behavior is expected to survive a restart
-// regardless of this behavior's existence.
+// SP-051: registered with the core BehaviorRegistry (Server.CustomBots,
+// playerbots/source/CustomBots/Behaviors/BehaviorRegistry.cs) via this
+// class's own Configure() below — NOT by editing that core file directly.
+// BehaviorRegistry.Register is a public, generic extensibility hook that
+// file's own header comment explicitly documents ("New behaviors should
+// add a line here in their own Configure() method"), and Configure() is
+// auto-discovered/invoked the same way every other Scripts/Custom
+// Configure() method already is (AmbientHouseManager.Configure(),
+// HouseDecorCommands.Configure(), ...) — before world load, the same
+// phase BehaviorRegistry's own Configure() runs in to register every
+// built-in behavior, which is why this must happen there and not later.
+//
+// Without this, PlayerBots aren't always purged and respawned fresh on
+// boot the way an earlier version of this comment assumed - an existing
+// save's own PlayerBot Mobiles deserialize with whatever SerializableName
+// their Behavior had at the last save, and AmbientHouseManager's ~90s
+// rotation means dozens of bots can genuinely be active Homeowners at
+// save time. Every one of them hit BehaviorRegistry.Create("Homeowner")
+// unregistered on the next boot, logged the "Unknown behavior... falling
+// back to Idle" warning, and got stuck as an inert IdleBehavior instead
+// of ever resuming ambient life. Registering the name fixes the warning
+// outright; the reconstructed instance still starts with no _house (this
+// class has no custom serialization of its own to recover which house it
+// was in), so it safely self-heals to TravelerBehavior on its very first
+// Tick via the existing _house?.Deleted != false guard below — the same
+// "self-heal on load" pattern BehaviorRegistry's own PartyMember/
+// CorpseReclaim/Duelist entries already rely on. AmbientHouseManager's own
+// rotation then naturally re-absorbs it into a (possibly different) house
+// within its usual ~90s cycle, same as any other idle-pool bot.
 // =========================================================================
 
 using System;
@@ -46,6 +68,16 @@ namespace Server.CustomBots
 {
     public class HomeownerBehavior : PlayerBotBehavior
     {
+        // Auto-discovered/invoked at startup like every other Scripts/
+        // Custom Configure() method — see this file's own header for why
+        // registering here, rather than editing BehaviorRegistry.cs
+        // directly, is both sufficient and the pattern that file's own
+        // header comment asks for.
+        public static void Configure()
+        {
+            BehaviorRegistry.Register("Homeowner", () => new HomeownerBehavior());
+        }
+
         public override string SerializableName => "Homeowner";
 
         // Read-only so external code (AmbientHouseManager's [leavehome
@@ -86,6 +118,18 @@ namespace Server.CustomBots
         private Timer _stepTimer;
         private DateTime _walkDeadline;
 
+        // SP-051: last Hits value observed, so a drop between ticks (AoE
+        // spells, wild-area effects, or a controlled pet - none of which
+        // ResidentBotSanctuary.cs blocks, since it only stops WILD
+        // creatures) can be caught reactively even though nothing in this
+        // codebase exposes a real per-damage-instance hook without editing
+        // core (Mobile.OnDamage is virtual but PlayerBot isn't partial;
+        // Region.OnDamage would need a live house's own hardcoded
+        // HouseRegion overridden, which BaseHouse.cs constructs directly).
+        // Polled at this behavior's own ~2s Tick cadence instead - the same
+        // cadence every other ambient domestic action here already runs on.
+        private int _lastHits;
+
         // Called BEFORE this instance is assigned to bot.Behavior (see
         // AmbientHouseManager.BeginVisit), so OnAttached below always sees
         // a fully-initialized house/dwell window.
@@ -110,6 +154,8 @@ namespace Server.CustomBots
             // silently skipped the way the old TryXxx pattern allowed.
             bot.MoveToWorld(FindInteriorSpot(), _house.Map);
             bot.ProcessDelta();
+
+            _lastHits = bot.Hits;
         }
 
         public override void OnDetached(PlayerBot bot)
@@ -121,6 +167,31 @@ namespace Server.CustomBots
 
         public override void Tick(PlayerBot bot)
         {
+            // SP-051: checked before anything else below - a bot that took
+            // damage since the last tick (AoE, wild-area effect, or a
+            // controlled pet ResidentBotSanctuary.cs deliberately doesn't
+            // block) breaks out of domestic idle immediately: stop any
+            // in-progress walk/flavor-action state and hand the bot off to
+            // AdventurerBehavior, which owns real combat/threat-acquisition
+            // logic and self-initializes entirely from its own OnAttached
+            // (Home/HomeMap/RetreatHpFraction/... all derived from the
+            // bot's current state) - nothing further needs wiring up here.
+            // Hits only ever needs comparing against the immediately
+            // preceding tick, so it's updated on every path through here,
+            // not just the trigger path, or natural regen between ticks
+            // would eventually read as a stale "still below old baseline"
+            // false positive.
+            var hits = bot.Hits;
+            var tookDamage = hits < _lastHits;
+            _lastHits = hits;
+
+            if (tookDamage)
+            {
+                StopWalk();
+                bot.Behavior = new AdventurerBehavior();
+                return;
+            }
+
             // Logged BEFORE CheckVisitExpired runs the actual transition,
             // since that call (base class, PlayerBotBehavior) both swaps
             // bot.Behavior to a fresh Traveler AND — via the Behavior
