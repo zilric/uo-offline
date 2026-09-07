@@ -1676,6 +1676,45 @@ install_housing_scripts() {
 }
 
 # ---------------------------------------------------------------------------
+# Dungeon custom scripts (Scripts/Custom/Dungeons/ - era-adaptive chest loot,
+# restock lifecycle). Same hash-gated *.cs mirror as install_housing_scripts.
+# ---------------------------------------------------------------------------
+install_dungeon_scripts() {
+  banner "Installing Dungeon custom scripts (chest loot, restock lifecycle)"
+
+  local src_dir="${SCRIPT_DIR}/Scripts/Custom/Dungeons"
+  if [[ ! -d "${src_dir}" ]]; then
+    say "No Scripts/Custom/Dungeons/ next to this installer; skipping (optional)."
+    return
+  fi
+
+  local dest_dir="${MODERNUO_DIR}/Projects/UOContent/Scripts/Custom/Dungeons"
+  local changed=0
+  local new_hash prev_hash="" hash_file="${dest_dir}/.deployed-hash"
+
+  new_hash="$(find "${src_dir}" -type f -exec sha256sum {} + 2>/dev/null | sort | sha256sum | cut -d' ' -f1)"
+  [[ -f "${hash_file}" ]] && prev_hash="$(cat "${hash_file}")"
+
+  if [[ -d "${dest_dir}" && "${new_hash}" == "${prev_hash}" ]]; then
+    say "Dungeon custom scripts unchanged. Skipping deploy."
+    return
+  fi
+
+  mkdir -p "${dest_dir}"
+  find "${dest_dir}" -maxdepth 1 -name '*.cs' -delete
+  cp -f "${src_dir}"/*.cs "${dest_dir}/"
+  echo "${new_hash}" > "${hash_file}"
+  changed=1
+
+  if [[ "${changed}" == "1" ]] && [[ -f "${DIST_DIR}/ModernUO.dll" ]]; then
+    say "Dungeon custom scripts changed — clearing build cache to trigger rebuild"
+    rm -f "${DIST_DIR}/ModernUO.dll"
+  fi
+
+  ok "Dungeon custom scripts deployed -> ${dest_dir}"
+}
+
+# ---------------------------------------------------------------------------
 # Lifecycle: install
 # ---------------------------------------------------------------------------
 do_install() {
@@ -1700,6 +1739,7 @@ do_install() {
   install_maritime
   install_playerbot_scripts
   install_housing_scripts
+  install_dungeon_scripts
   install_map_editor
   build_modernuo
   fix_felucca_season
@@ -1753,6 +1793,7 @@ do_update() {
   install_maritime
   install_playerbot_scripts
   install_housing_scripts
+  install_dungeon_scripts
 
   say "Forcing a rebuild against the updated source..."
   rm -f "${DIST_DIR}/ModernUO.dll"
