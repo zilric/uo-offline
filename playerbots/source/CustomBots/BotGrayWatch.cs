@@ -79,9 +79,9 @@ namespace Server.CustomBots
         private const int MaxAttackers = 3;
 
         // Base willingness, before personality.
-        private const int WillingPercent  = 35;
-        private const int BraveWilling    = 60;
-        private const int CautiousWilling = 15;
+        private const int WillingPercent  = 50;
+        private const int BraveWilling    = 75;
+        private const int CautiousWilling = 25;
 
         // Odds the first bot in says something.
         private const double ShoutChance = 0.45;
@@ -301,7 +301,7 @@ namespace Server.CustomBots
                 var (bot, gray, first) = _pending[i];
 
                 if (bot.Deleted || !bot.Alive || !IsFairGame(gray) ||
-                    bot.Combatant != null)
+                    BusyWithAPerson(bot))
                 {
                     continue; // the world moved while we were deciding
                 }
@@ -342,6 +342,20 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         // Is this a criminal worth drawing on?
         // -------------------------------------------------------------------
+        // The same question for the behaviors. AdventurerBehavior asks it
+        // when a player-shaped thing is hitting one of its bots, so the bot
+        // fights back on its own instead of waiting for a sweep.
+        public static bool FairGame(Mobile m) => m != null && IsFairGame(m);
+
+        // Already in a fight with a PERSON: a gray, a red, a duel. That
+        // fight stands. A fight with a monster does not: a murderer walking
+        // past outranks the skeleton, which is how it was for the players
+        // too. This used to be "has any combatant at all", and in a dungeon
+        // every fighter has one most of the time, so the bots who would
+        // have drawn were nearly all counted as busy.
+        private static bool BusyWithAPerson(PlayerBot bot) =>
+            bot.Combatant is Mobile c && c is not BaseCreature;
+
         private static bool IsFairGame(Mobile m)
         {
             if (m.Deleted || !m.Alive || !m.Player ||
@@ -385,7 +399,7 @@ namespace Server.CustomBots
         private static bool WouldDraw(PlayerBot bot, Mobile gray)
         {
             if (bot == gray || bot.Deleted || !bot.Alive || bot.LoggingOut ||
-                bot.Combatant != null || bot.Map != gray.Map)
+                BusyWithAPerson(bot) || bot.Map != gray.Map)
             {
                 return false;
             }

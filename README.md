@@ -13,6 +13,8 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
 
 Newest first.
 
+- **Fighting retreats.** A bot with a pack on its heels used to run to the next waypoint, get "clear", walk back, and do it again, for minutes. Now it decides at the start whether the pack is made of things it could beat one at a time. If so it runs until they string out and turns on the one in front, then runs again when the rest arrive. If not, it runs further, stays away longer, and a crawler drops the room from its rounds.
+- **Blues really go after reds.** A blue mid-fight with any monster was never handed a red, dropped one for the first rat that bit it, and could not see a murderer hitting it unless the watch stepped in. A red now outranks every monster in the room, a red or gray attacking you or a friend is a target on sight, and more of the crowd is willing to draw.
 - **Mages kite instead of plinking.** Magic Arrow was nearly half of every caster's spells, and it never won a fight. Casters back off to spell range now and open with the stronger circles, and a tank mage no longer drops its halberd to plink.
 - **Resurrection is real.** Dead bots used to stand up on their own after a while, with no healer anywhere near. A ghost now walks to an ankh or a wandering healer, or gets raised by a friendly bot with the Magery or Healing to do it. Ghosts that die underground climb out first. Reds strip the bodies they make and never raise their own victim.
 - **Parties are bigger and look after each other.** Random hunting parties were two bots and rare. They form at three to five now, scaled to how many bots are online, help any partymate against reds and monsters, and resurrect the fallen. If the leader dies, someone else takes over.
