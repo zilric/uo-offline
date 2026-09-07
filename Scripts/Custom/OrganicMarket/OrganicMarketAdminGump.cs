@@ -27,6 +27,7 @@ public class OrganicMarketAdminGump : DynamicGump
     private const int ButtonGlobalRestock = 3;
     private const int ButtonWipeAll = 4;
     private const int ButtonSeedWorldFrontier = 8;
+    private const int ButtonSeedTransitVendors = 9;
 
     private static readonly MarketHouseStyle[] Styles =
     {
@@ -83,8 +84,9 @@ public class OrganicMarketAdminGump : DynamicGump
         // Houses)" and "Seed World Crossroads" rows (WorldHouseSeeder.cs)
         // are both gone now that file itself is deleted, leaving Seed
         // World (Frontier Density) as the only "seed world" action.
+        // SP-050: +34px for the new "Seed Transit & Gate Vendors" row.
         const int width = 380;
-        const int height = 642;
+        const int height = 676;
         const int radioRowHeight = 24;
 
         builder.AddPage();
@@ -133,7 +135,11 @@ public class OrganicMarketAdminGump : DynamicGump
         builder.AddButton(24, frontierY, 4005, 4007, ButtonSeedWorldFrontier);
         builder.AddLabel(60, frontierY, 0x59, "Seed World (Frontier Density)");
 
-        var restockY = frontierY + 40;
+        var transitY = frontierY + 34;
+        builder.AddButton(24, transitY, 4005, 4007, ButtonSeedTransitVendors);
+        builder.AddLabel(60, transitY, 0x59, "Seed Transit & Gate Vendors (Compact Shops)");
+
+        var restockY = transitY + 40;
         builder.AddHtml(20, restockY - 10, width - 40, 2, "<basefont color=#555555>________________________________</basefont>");
         builder.AddButton(24, restockY + 16, 4005, 4007, ButtonGlobalRestock);
         builder.AddLabel(60, restockY + 16, 0x44, "Force Global Restock (all vendors)");
@@ -182,6 +188,12 @@ public class OrganicMarketAdminGump : DynamicGump
             case ButtonSeedWorldFrontier:
                 from.SendMessage("OrganicMarket: seeding frontier-density houses across the mainland...");
                 WorldFrontierSeeder.Seed(from);
+                DisplayTo(from);
+                break;
+
+            case ButtonSeedTransitVendors:
+                from.SendMessage("OrganicMarket: seeding transit-corridor and moongate compact shops...");
+                TransitVendorSeeder.Seed(from);
                 DisplayTo(from);
                 break;
         }

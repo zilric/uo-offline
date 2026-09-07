@@ -33,7 +33,8 @@ public enum PanelCategory
     OrganicMarket,
     PlayerBots,
     WaypointsHpa,
-    Diagnostics
+    Diagnostics,
+    SpawnersWorld
 }
 
 public record PanelCommand(string Command, string Description, AccessLevel AccessLevel, bool RequiresTargetOrArgs);
@@ -47,18 +48,20 @@ public static class CommandPanelRegistry
         PanelCategory.OrganicMarket,
         PanelCategory.PlayerBots,
         PanelCategory.WaypointsHpa,
-        PanelCategory.Diagnostics
+        PanelCategory.Diagnostics,
+        PanelCategory.SpawnersWorld
     };
 
     public static string DisplayName(PanelCategory category) =>
         category switch
         {
-            PanelCategory.Maritime     => "Maritime / Ferry",
+            PanelCategory.Maritime      => "Maritime / Ferry",
             PanelCategory.OrganicMarket => "Organic Market",
-            PanelCategory.PlayerBots   => "PlayerBots",
-            PanelCategory.WaypointsHpa => "Waypoints & HPA",
-            PanelCategory.Diagnostics  => "Diagnostics & GM Tools",
-            _                          => category.ToString()
+            PanelCategory.PlayerBots    => "PlayerBots",
+            PanelCategory.WaypointsHpa  => "Waypoints & HPA",
+            PanelCategory.Diagnostics   => "Diagnostics & GM Tools",
+            PanelCategory.SpawnersWorld => "Spawners & World",
+            _                           => category.ToString()
         };
 
     private static readonly Dictionary<PanelCategory, List<PanelCommand>> _entries = new();
@@ -93,6 +96,7 @@ public static class CommandPanelRegistry
         Register(PanelCategory.OrganicMarket, "exportdecor", "Export a house's decor as a reusable JSON blueprint", AccessLevel.GameMaster, requiresArgs: true);
         Register(PanelCategory.OrganicMarket, "importdecor", "Apply a saved decor blueprint to a compatible house", AccessLevel.GameMaster, requiresArgs: true);
         Register(PanelCategory.OrganicMarket, "seedworldfrontier", "Fast-batched frontier-density house/vendor seeding across the mainland", AccessLevel.GameMaster, requiresArgs: false);
+        Register(PanelCategory.OrganicMarket, "seedtransitvendors", "Fast-batched compact-shop seeding around moongates (70% vendor) and roads (25% vendor)", AccessLevel.GameMaster, requiresArgs: false);
 
         // --- PlayerBots --- (CustomBots/)
         Register(PanelCategory.PlayerBots, "SpawnBot", "Spawn one bot of a class/tier here (needs args)", AccessLevel.GameMaster, requiresArgs: true);
@@ -129,5 +133,8 @@ public static class CommandPanelRegistry
         Register(PanelCategory.Diagnostics, "BotDanger", "List places with recent murder heat", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.Diagnostics, "BotSessions", "Show or toggle bot session-layer status", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.Diagnostics, "BotFactions", "Show faction war status / force a fight", AccessLevel.GameMaster, requiresArgs: false);
+
+        // --- Spawners & World --- (Scripts/Custom/Dungeons/DungeonChestManager.cs)
+        Register(PanelCategory.SpawnersWorld, "restockdungeonchests", "Re-roll lock/trap state and regenerate loot on every dungeon chest", AccessLevel.GameMaster, requiresArgs: false);
     }
 }
