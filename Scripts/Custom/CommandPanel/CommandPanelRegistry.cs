@@ -97,6 +97,7 @@ public static class CommandPanelRegistry
         Register(PanelCategory.OrganicMarket, "importdecor", "Apply a saved decor blueprint to a compatible house", AccessLevel.GameMaster, requiresArgs: true);
         Register(PanelCategory.OrganicMarket, "seedworldfrontier", "Fast-batched frontier-density house/vendor seeding across the mainland", AccessLevel.GameMaster, requiresArgs: false);
         Register(PanelCategory.OrganicMarket, "seedtransitvendors", "Fast-batched compact-shop seeding around moongates (70% vendor) and roads (25% vendor)", AccessLevel.GameMaster, requiresArgs: false);
+        Register(PanelCategory.OrganicMarket, "regridvendor", "Target a vendor and re-arrange its sale containers into a grid", AccessLevel.GameMaster, requiresArgs: true);
 
         // --- PlayerBots --- (CustomBots/)
         Register(PanelCategory.PlayerBots, "SpawnBot", "Spawn one bot of a class/tier here (needs args)", AccessLevel.GameMaster, requiresArgs: true);

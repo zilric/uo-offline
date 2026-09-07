@@ -422,6 +422,7 @@ public partial class MerchantGuildAuthority : Mobile
                 {
                     ClearVendorStock(v);
                     StockTemplateEngine.StockVendor(v, a, vendorIndex);
+                    VendorGridArranger.Arrange(v); // SP-053: re-arrange fresh restock
                     v.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
                     v.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
                     count++;
@@ -501,6 +502,7 @@ public partial class MerchantGuildAuthority : Mobile
 
         ClearVendorStock(vendor);
         StockTemplateEngine.StockVendor(vendor, a, vendorIndex);
+        VendorGridArranger.Arrange(vendor); // SP-053: re-arrange fresh restock
         vendor.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
         vendor.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
 

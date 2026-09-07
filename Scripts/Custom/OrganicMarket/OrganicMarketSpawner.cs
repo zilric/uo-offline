@@ -742,6 +742,11 @@ public static class OrganicMarketSpawner
         StockTemplateEngine.ApplyVendorTheme(vendor, archetype, vendorIndex);
         NameWornApparel(vendor);
 
+        // SP-053: fresh stock has no positional layout of its own
+        // (StockTemplateEngine only ever DropItem's) - arrange it into a
+        // grid before this vendor's shop is ever seen.
+        VendorGridArranger.Arrange(vendor);
+
         return vendor;
     }
 

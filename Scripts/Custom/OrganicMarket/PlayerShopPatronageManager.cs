@@ -956,6 +956,13 @@ public static class PlayerShopPatronageManager
 
         vendor.HoldGold += vi.Price;
 
+        // SP-053: compact the sale grid now that this slot is gone rather
+        // than leaving a hole - this is the one purchase path this
+        // codebase fully owns end-to-end (see VendorGridArranger.cs's own
+        // header for why a real player's purchase can't be hooked the
+        // same way without editing core).
+        VendorGridArranger.Arrange(vendor);
+
         if (VerboseConfig.VendorStock)
         {
             logger.Information(
