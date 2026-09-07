@@ -38,6 +38,10 @@ namespace Server.CustomBots
         public override string GetStatusLine(PlayerBot bot) =>
             $"corpse run → ({_corpseLoc.X},{_corpseLoc.Y})";
 
+        // For the fleet-wide nav watchdog: the body is the whole goal.
+        public override Point3D? NavGoal(PlayerBot bot) =>
+            _stepTimer != null ? _corpseLoc : null;
+
         public override void OnAttached(PlayerBot bot)
         {
             base.OnAttached(bot);

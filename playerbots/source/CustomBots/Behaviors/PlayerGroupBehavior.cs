@@ -113,16 +113,106 @@ namespace Server.CustomBots
                 _lostSince = DateTime.MinValue;
             }
 
-            // Assist: pick up the leader's fight the moment it starts.
-            if (bot.Alive && bot.Combatant == null &&
-                leader.Combatant is BaseCreature bc &&
-                !bc.Deleted && bc.Alive && bc.Map == bot.Map &&
-                bot.InRange(bc.Location, 12))
+            // Assist: whatever is on ANY of us is on all of us. This used
+            // to pick up only the leader's fight, and only against a
+            // monster — a red on the player, or on another member, got
+            // a bot standing there watching. Same rule the bot-led hunts
+            // use now.
+            if (bot.Alive && bot.Combatant == null)
             {
-                bot.Combatant = bc;
+                var foe = PartyFoe(bot);
+                if (foe != null)
+                {
+                    bot.Combatant = foe;
+                    if (CombatDebug)
+                    {
+                        Console.WriteLine(
+                            $"[party] {bot.Name} assists {leader.Name}'s party against '{foe.Name}'");
+                    }
+                }
             }
 
             base.Tick(bot);
+        }
+
+        private const int AssistRange = 14;
+
+        // Nearest thing fighting a member of the player's party. A monster
+        // always counts. A person counts only when they are the aggressor
+        // — attacking one of us, or a standing murderer — so the bot never
+        // swings first at a blue the player happens to be duelling.
+        private static Mobile PartyFoe(PlayerBot bot)
+        {
+            if (bot.Party is not Party p)
+            {
+                return null;
+            }
+
+            Mobile best = null;
+            int bestDist = int.MaxValue;
+            for (int i = 0; i < p.Members.Count; i++)
+            {
+                var mate = p.Members[i].Mobile;
+                if (mate == null || mate == bot || mate.Deleted || !mate.Alive ||
+                    mate.Map != bot.Map)
+                {
+                    continue;
+                }
+
+                // A foe fighting this mate, or one this mate is fighting.
+                Mobile foe = mate.Combatant as Mobile;
+                if (!IsHostileToParty(foe, p))
+                {
+                    foe = null;
+                }
+                if (foe == null)
+                {
+                    foreach (var m in mate.GetMobilesInRange(AssistRange))
+                    {
+                        if (m.Combatant == mate && IsHostileToParty(m, p))
+                        {
+                            foe = m;
+                            break;
+                        }
+                    }
+                }
+                if (foe == null || foe.Map != bot.Map || bot.IsUnreachable(foe))
+                {
+                    continue;
+                }
+
+                int d = Math.Max(Math.Abs(foe.X - bot.X), Math.Abs(foe.Y - bot.Y));
+                if (d <= AssistRange && d < bestDist)
+                {
+                    bestDist = d;
+                    best = foe;
+                }
+            }
+            return best;
+        }
+
+        private static bool IsHostileToParty(Mobile foe, Party p)
+        {
+            if (foe == null || foe.Deleted || !foe.Alive || Party.Get(foe) == p)
+            {
+                return false;
+            }
+            if (foe is BaseCreature bc)
+            {
+                return bc.ControlMaster == null || Party.Get(bc.ControlMaster) != p;
+            }
+            if (foe is PlayerMobile pm)
+            {
+                if (pm.Murderer)
+                {
+                    return true;
+                }
+                if (pm.Combatant is Mobile target && Party.Get(target) == p)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // A monster fighting ANY member of my party is attacking a friend.

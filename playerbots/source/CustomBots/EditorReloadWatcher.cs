@@ -1,4 +1,4 @@
-// =========================================================================
+﻿// =========================================================================
 // EditorReloadWatcher.cs — lets the map editor's buttons act on the running
 // game without typing commands in the client.
 //
@@ -63,6 +63,10 @@ namespace Server.CustomBots
         private static readonly string GossipAck = Live("gossip_ack.json");
         private static readonly string PadReq = Live("padaudit_request.txt");
         private static readonly string PadAck = Live("padaudit_report.json");
+        // padmap_request.txt: "token" - sweep every dungeon teleporter in
+        // the world and report the ones no destination record covers. The
+        // inverse of the pad audit; feeds the offline stair-authoring tool.
+        private static readonly string PadMapReq = Live("padmap_request.txt");
         // say_request.txt: "token x y text..." — spawns a throwaway REAL
         // PlayerMobile at (x,y) that says the text, then deletes. Purely a
         // headless test rig for player-facing reactions (speech responder).
@@ -111,6 +115,7 @@ namespace Server.CustomBots
         private static long _lastGoto = -1;
         private static long _lastGossip = -1;
         private static long _lastPad = -1;
+        private static long _lastPadMap = -1;
         private static long _lastSay = -1;
         private static long _lastPartyTest = -1;
         private static long _lastT2A = -1;
@@ -130,7 +135,7 @@ namespace Server.CustomBots
             _lastAudit  = ReadToken(AuditReq) ?? 0;
             _lastWalk   = ReadWalkRequest(out _, out _, out _, out _) ?? 0;
             _lastParty  = ReadToken(PartyReq) ?? 0;
-            _lastDeath  = ReadToken(DeathReq) ?? 0;
+            _lastDeath  = ReadDeathRequest(out _) ?? 0;
             _lastFaction = ReadToken(FactionReq) ?? 0;
             _lastLiveMap = ReadLiveMapRequest(out _) ?? 0;
             _lastPKs = ReadToken(PKsReq) ?? 0;
@@ -142,6 +147,7 @@ namespace Server.CustomBots
             _lastGoto = ReadGotoRequest(out _) ?? 0;
             _lastGossip = ReadToken(GossipReq) ?? 0;
             _lastPad = ReadToken(PadReq) ?? 0;
+            _lastPadMap = ReadToken(PadMapReq) ?? 0;
             _lastSay = ReadSayRequest(out _, out _, out _) ?? 0;
             _lastPartyTest = ReadCoordRequest(PartyTestReq, out _) ?? 0;
             _lastT2A = ReadToken(T2AReq) ?? 0;
@@ -206,11 +212,11 @@ namespace Server.CustomBots
                 DoFormParty(partyTok.Value);
             }
 
-            var deathTok = ReadToken(DeathReq);
+            var deathTok = ReadDeathRequest(out var deathWhere);
             if (deathTok != null && deathTok.Value != _lastDeath)
             {
                 _lastDeath = deathTok.Value;
-                DoTestDeath(deathTok.Value);
+                DoTestDeath(deathTok.Value, deathWhere);
             }
 
             var factionTok = ReadToken(FactionReq);
@@ -288,6 +294,17 @@ namespace Server.CustomBots
             {
                 _lastPad = padTok.Value;
                 DoPadAudit(padTok.Value);
+            }
+
+            var padMapTok = ReadToken(PadMapReq);
+            if (padMapTok != null && padMapTok.Value != _lastPadMap)
+            {
+                _lastPadMap = padMapTok.Value;
+                try { BotPadDiscovery.Run(); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[EditorReload] pad map: {ex.Message}");
+                }
             }
 
             var sayTok = ReadSayRequest(out var sayLoc, out var sayText, out _);
@@ -569,9 +586,32 @@ namespace Server.CustomBots
 
                 if (pick == null)
                 {
-                    Console.WriteLine("[partytest] no eligible bot within 25 tiles");
-                    rig.Delete();
-                    return;
+                    // Nobody in earshot — borrow the nearest eligible bot
+                    // from anywhere. It is a test rig; the walk is the
+                    // point, not the recruiting.
+                    foreach (var m in World.Mobiles.Values)
+                    {
+                        if (m is PlayerBot b && !b.Deleted && b.Alive && b.Map == map &&
+                            !b.LifecycleExempt && b.Party == null &&
+                            !BotPartyManager.IsInParty(b) &&
+                            !BotClassHelper.IsArtisan(b.Class) &&
+                            !BotClassHelper.IsGatherer(b.Class) &&
+                            b.Class != BotClass.Crafter && !RedTerritory.IsRed(b) &&
+                            !DungeonRegistry.IsInDungeon(b) &&
+                            b.Behavior is TravelerBehavior or IdleBehavior or WanderBehavior)
+                        {
+                            pick = b;
+                            break;
+                        }
+                    }
+                    if (pick == null)
+                    {
+                        Console.WriteLine("[partytest] no eligible bot anywhere");
+                        rig.Delete();
+                        return;
+                    }
+                    pick.MoveToWorld(new Point3D(loc.X - 2, loc.Y, loc.Z), map);
+                    Console.WriteLine($"[partytest] nobody within 25 tiles; borrowed {pick.Name}");
                 }
 
                 Console.WriteLine($"[partytest] rig at ({loc.X},{loc.Y}) inviting {pick.Name}");
@@ -601,6 +641,48 @@ namespace Server.CustomBots
                             $"{pick.Name} dist={dist}, behavior={pick.Behavior?.SerializableName}");
                     });
                 }
+
+                // The fight. A red out of the field is dropped on the rig
+                // and set on it; the question is whether the invited bot
+                // turns on the red — the assist that used to cover only
+                // monsters on the leader.
+                Timer.DelayCall(TimeSpan.FromSeconds(24), () =>
+                {
+                    if (rig.Deleted || pick.Deleted)
+                    {
+                        return;
+                    }
+                    PlayerBot red = null;
+                    foreach (var m in World.Mobiles.Values)
+                    {
+                        if (m is PlayerBot r && !r.Deleted && r.Alive && !r.LoggingOut &&
+                            r.Behavior is PKBehavior &&
+                            !RedTerritory.IsGuardedPlace(r.Location, r.Map))
+                        {
+                            red = r;
+                            break;
+                        }
+                    }
+                    if (red == null)
+                    {
+                        Console.WriteLine("[partytest] no field red to stage the fight with");
+                        return;
+                    }
+                    red.MoveToWorld(new Point3D(rig.X + 2, rig.Y, rig.Z), map);
+                    red.Combatant = rig;
+                    rig.Combatant = red;
+                    Console.WriteLine($"[partytest] red {red.Name} dropped on the rig and set on it");
+
+                    Timer.DelayCall(TimeSpan.FromSeconds(12), () =>
+                    {
+                        var foe = pick.Combatant as Mobile;
+                        Console.WriteLine(
+                            $"[partytest] 12s later: {pick.Name} combatant=" +
+                            $"{(foe == null ? "none" : foe.Name)} " +
+                            $"({(foe == red ? "ASSISTING vs the red" : "not on the red")}) " +
+                            $"status='{pick.Behavior?.GetStatusLine(pick)}'");
+                    });
+                });
 
                 Timer.DelayCall(TimeSpan.FromSeconds(70), () =>
                 {
@@ -769,6 +851,91 @@ namespace Server.CustomBots
         }
 
         // "token [linger]" — token plus an optional seconds argument.
+        // death_request.txt "token pk": hand a red a victim. Picks a PK out
+        // in the field (never one standing under guards) and drops an
+        // ordinary blue bot beside it; PKBehavior's own scan does the
+        // hunting, the killing and the looting. Watch the [pk] lines.
+        private static void DoTestPkAmbush(long token)
+        {
+            var reds = new List<PlayerBot>();
+            var blues = new List<PlayerBot>();
+
+            foreach (var m in World.Mobiles.Values)
+            {
+                if (m is not PlayerBot bot || bot.Deleted || !bot.Alive ||
+                    bot.LoggingOut)
+                {
+                    continue;
+                }
+
+                if (bot.Behavior is PKBehavior &&
+                    !RedTerritory.IsGuardedPlace(bot.Location, bot.Map))
+                {
+                    reds.Add(bot);
+                }
+                else if (!RedTerritory.IsRed(bot) && !bot.LifecycleExempt &&
+                         !BotPartyManager.IsInParty(bot) &&
+                         !DungeonRegistry.IsInDungeon(bot))
+                {
+                    blues.Add(bot);
+                }
+            }
+
+            if (reds.Count == 0 || blues.Count == 0)
+            {
+                Console.WriteLine(
+                    $"[EditorReload] pk ambush: no {(reds.Count == 0 ? "field PK" : "blue")} " +
+                    $"available (token {token}).");
+                WriteAck(DeathAck,
+                    $"{{\"token\":{token},\"killed\":false,\"where\":\"pk\"}}");
+                return;
+            }
+
+            var red  = reds[Utility.Random(reds.Count)];
+            var prey = blues[Utility.Random(blues.Count)];
+            prey.MoveToWorld(new Point3D(red.X + 1, red.Y, red.Z), red.Map);
+
+            Console.WriteLine(
+                $"[EditorReload] pk ambush: {prey.Name} dropped next to " +
+                $"{red.Name} at ({red.X},{red.Y}) (token {token}).");
+
+            WriteAck(DeathAck,
+                $"{{\"token\":{token},\"killed\":false,\"where\":\"pk\"," +
+                $"\"red\":\"{red.Name.Replace("\"", "\\\"")}\"," +
+                $"\"prey\":\"{prey.Name.Replace("\"", "\\\"")}\"," +
+                $"\"x\":{red.X},\"y\":{red.Y}}}");
+        }
+
+        // "token [where]" — the death rig's optional target word
+        // (surface / dungeon / aid). See DoTestDeath.
+        private static long? ReadDeathRequest(out string where)
+        {
+            where = "surface";
+            try
+            {
+                if (!File.Exists(DeathReq))
+                {
+                    return null;
+                }
+                var parts = File.ReadAllText(DeathReq).Split(
+                    new[] { ' ', '	' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1 || !long.TryParse(parts[0], out var t))
+                {
+                    return null;
+                }
+                if (parts.Length > 1)
+                {
+                    where = parts[1].Trim();
+                }
+                return t;
+            }
+            catch
+            {
+                // file may be mid-write; retry next tick
+            }
+            return null;
+        }
+
         private static long? ReadLingerRequest(string path, out int linger)
         {
             linger = BotGrayTest.DefaultLinger;
@@ -1153,18 +1320,53 @@ namespace Server.CustomBots
                 $"\"seconds\":{seconds:0.#},\"entities\":{n}}}");
         }
 
-        // death_request.txt: kill a random eligible surface bot so headless
-        // soaks can exercise the full death story (ghost → healer walk →
-        // res → corpse run) on demand. Watch the [death] console lines.
-        private static void DoTestDeath(long token)
+        // death_request.txt: "token [where]" — kill a bot so headless soaks
+        // can exercise the full death story on demand. Watch the [death]
+        // console lines.
+        //
+        //   surface  (default) a bot out in the world: ghost → healer walk
+        //                      → res at a real ankh → corpse run.
+        //   dungeon            a bot INSIDE a dungeon: the climb-out
+        //                      (GhostExitBehavior) up the stairs and only
+        //                      then the walk to a res site.
+        //   aid                a bot with someone who can raise it standing
+        //                      right there — a mage with Resurrection or a
+        //                      healer with bandages, teleported next to the
+        //                      victim if none happened to be nearby.
+        //   pk                 nobody is killed outright: a blue is dropped
+        //                      next to a red out in the field and the PK
+        //                      brain does the rest, so the murder AND the
+        //                      corpse strip can be watched end to end.
+        private static void DoTestDeath(long token, string where)
         {
+            if (string.Equals(where, "pk", StringComparison.OrdinalIgnoreCase))
+            {
+                DoTestPkAmbush(token);
+                return;
+            }
+
+            bool wantDungeon = string.Equals(where, "dungeon", StringComparison.OrdinalIgnoreCase);
+            bool wantAid     = string.Equals(where, "aid", StringComparison.OrdinalIgnoreCase);
+
             var candidates = new List<PlayerBot>();
+            var aiders = new List<PlayerBot>();
+
             foreach (var m in World.Mobiles.Values)
             {
-                if (m is PlayerBot bot && !bot.Deleted && bot.Alive &&
-                    !bot.LifecycleExempt && !bot.LoggingOut &&
-                    !BotPartyManager.IsInParty(bot) &&
-                    !DungeonRegistry.IsInDungeon(bot))
+                if (m is not PlayerBot bot || bot.Deleted || !bot.Alive ||
+                    bot.LifecycleExempt || bot.LoggingOut ||
+                    BotPartyManager.IsInParty(bot))
+                {
+                    continue;
+                }
+
+                if (BotResurrectAid.CanAid(bot))
+                {
+                    aiders.Add(bot);
+                }
+
+                bool inDungeon = DungeonRegistry.IsInDungeon(bot);
+                if (wantDungeon ? inDungeon : !inDungeon)
                 {
                     candidates.Add(bot);
                 }
@@ -1172,16 +1374,53 @@ namespace Server.CustomBots
 
             if (candidates.Count == 0)
             {
-                WriteAck(DeathAck, $"{{\"token\":{token},\"killed\":false}}");
+                Console.WriteLine(
+                    $"[EditorReload] test death: no {where} bot to kill (token {token}).");
+                WriteAck(DeathAck,
+                    $"{{\"token\":{token},\"killed\":false,\"where\":\"{where}\"}}");
                 return;
             }
 
             var victim = candidates[Utility.Random(candidates.Count)];
-            Console.WriteLine($"[EditorReload] test death: killing {victim.Name} (token {token}).");
+            string helper = null;
+
+            if (wantAid)
+            {
+                // A blue helper for a blue victim, so notoriety doesn't
+                // veto the favour (BotResurrectAid.Willing).
+                aiders.Remove(victim);
+                foreach (var a in aiders)
+                {
+                    if (RedTerritory.IsRed(a) == RedTerritory.IsRed(victim))
+                    {
+                        helper = a.Name;
+                        a.MoveToWorld(victim.Location, victim.Map);
+                        Console.WriteLine(
+                            $"[EditorReload] test death: {a.Name} " +
+                            $"({BotResurrectAid.KindFor(a)}) moved next to {victim.Name}.");
+                        break;
+                    }
+                }
+                if (helper == null)
+                {
+                    Console.WriteLine(
+                        "[EditorReload] test death: nobody in the world can " +
+                        "resurrect — killing anyway.");
+                }
+            }
+
+            Console.WriteLine(
+                $"[EditorReload] test death: killing {victim.Name} at " +
+                $"({victim.X},{victim.Y}) in {victim.Region?.Name ?? "?"} (token {token}).");
             victim.Kill();
+
             WriteAck(DeathAck,
                 $"{{\"token\":{token},\"killed\":true," +
+                $"\"where\":\"{where}\"," +
                 $"\"name\":\"{victim.Name.Replace("\"", "\\\"")}\"," +
+                (helper == null
+                    ? ""
+                    : $"\"helper\":\"{helper.Replace("\"", "\\\"")}\",") +
                 $"\"x\":{victim.X},\"y\":{victim.Y}}}");
         }
 

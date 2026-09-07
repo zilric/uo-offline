@@ -1,13 +1,11 @@
-# Gossip/death.txt — retelling a bot's death (to a monster).
-# {actor} = who died, {other} = what killed them, {place}, {when}.
-
+# someone died to a monster. {other} = what killed them, may be empty
 {actor} died at {place} {when}
-heard {actor} got killed by {other} at {place}
-{actor} lost everything to {other} at {place}
-{other} got {actor} at {place} {when}. rough
-{actor} died at {place} again lol
-dont go to {place} alone, {actor} just died there
-{actor} got smoked by {other} at {place}
-rip {actor}, {other} at {place}
-{place} is rough, {actor} died there {when}
-{actor} needs a res, died at {place}
+{actor} got killed by {other} at {place}
+{other} got {actor} down in {place}
+dont go {place} alone. {actor} just died there
+{actor} needs a res. {place}
+{actor} died in {place} again
+heard {actor} went down at {place}. {other}
+{place} is bad right now. {actor} didnt come back
+{actor} lost their kit in {place}
+anyone got a res? {actor} is a ghost at {place}

@@ -184,6 +184,15 @@ namespace Server.CustomBots
         public int RecentDeaths;
         public DateTime LastDeathAt;
 
+        // Who put us here is Mobile.LastKiller, which the engine writes at
+        // the killing blow. There used to be a SECOND field of the same
+        // name declared right here, and it shadowed the engine's: Damage()
+        // filled in the base property, OnDeath read this one, and every
+        // death on the shard was logged as "killed by something" — thirty
+        // one out of thirty one in one soak. An audit that cannot name the
+        // killer cannot find the danger. The field is gone; the ghost's
+        // "never ask my own murderer" check reads the real one.
+
         // ---- Home city (IDEAS 1.3) ----
         //
         // Rolled at creation; destination picks weigh this city's spots
@@ -527,6 +536,7 @@ namespace Server.CustomBots
             return DoorHelper.TryOpenAhead(this, d) && base.Move(d);
         }
 
+
         // -------------------------------------------------------------------
         // Order vs Chaos is LEGAL combat (IDEAS 2.1 phase 3): harming an
         // opposing faction bot is not a criminal act, so no gray flag and —
@@ -788,7 +798,17 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         public override void OnDeath(Container c)
         {
-            var killer = LastKiller;
+            // The killing blow names its source when it has one. When it
+            // does not, the damage ledger still remembers who hit us last.
+            var killer = LastKiller ?? FindMostRecentDamager(false);
+
+            // A guard's kill is nameless by construction: BaseGuard deals
+            // HitsMax and then calls Kill() "just in case", and on a bot at
+            // full health HitsMax exactly is not a killing blow, so the
+            // engine never records who did it and Kill() carries no name.
+            // Every red cut down at a town gate read "killed by something".
+            string how = killer?.Name
+                ?? (RedTerritory.IsUnderGuards(this) ? "the town guards" : null);
 
             // A reflected spell (Magic Reflection bounces the bot's own
             // cast back) or a backfire can make a bot its own killer —
@@ -811,7 +831,18 @@ namespace Server.CustomBots
             base.OnDeath(c);
 
             // The corpse exists now — start the ghost/res/corpse-run story.
-            BotDeathManager.OnBotDeath(this, killer);
+            BotDeathManager.OnBotDeath(this, killer, how);
+
+            // ...and tell the murderer there is a body to go through. Said
+            // here rather than inside PKBehavior's own combat because half
+            // a red's kills never pass through its hunt loop at all: a blue
+            // that swings first is fought where it stands, and those bodies
+            // were walked away from untouched.
+            if (killer is PlayerBot { Deleted: false } redKiller &&
+                redKiller.Behavior is PKBehavior red)
+            {
+                red.OnKill(redKiller, this);
+            }
         }
 
         // -------------------------------------------------------------------

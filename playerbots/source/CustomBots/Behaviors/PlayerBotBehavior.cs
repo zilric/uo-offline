@@ -24,6 +24,20 @@ namespace Server.CustomBots
         // name. Must be cheap — it runs for every bot on every snapshot.
         public virtual string GetStatusLine(PlayerBot bot) => null;
 
+        // Where this brain is trying to WALK right now, if anywhere.
+        //
+        // Null means "standing still on purpose" — a bank sitter leaning on
+        // a wall, a smith at his forge, a crawler lingering in a cleared
+        // room, a bot mid-fight. BotNavWatch judges nothing that answers
+        // null, so a behavior only has to override this when it is actually
+        // navigating.
+        //
+        // This exists because every stuck watchdog in the codebase belongs
+        // to one behavior and counts its own attempts, so a bot that keeps
+        // RETRYING resets them all and jams silently forever. Distance to a
+        // goal is the one measure a retry cannot fake.
+        public virtual Point3D? NavGoal(PlayerBot bot) => null;
+
         // Chat config — override in subclasses.
         public virtual string[] ChatCategories { get; protected set; } = Array.Empty<string>();
         public virtual double ChatChance        { get; protected set; } = 0.15;
@@ -161,9 +175,13 @@ namespace Server.CustomBots
                 return false;
             }
 
-            if (Utility.RandomDouble() < GossipShare)
+            // Gossip is for people standing around. A bot with a foe on it
+            // has combat lines for that; turning to the player mid-fight to
+            // mention there were reds about read exactly as absurd as it
+            // sounds, and it happened, because this roll ran first.
+            if (bot.Combatant == null && Utility.RandomDouble() < GossipShare)
             {
-                var gossip = BotEventJournal.ComposeGossip(bot.Name, bot.Location);
+                var gossip = BotEventJournal.ComposeGossip(bot.Name, bot.Location, bot);
                 if (!string.IsNullOrEmpty(gossip))
                 {
                     SpeakLine(bot, gossip);

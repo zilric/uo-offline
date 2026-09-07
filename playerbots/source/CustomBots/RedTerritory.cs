@@ -155,7 +155,13 @@ namespace Server.CustomBots
         // detour is taken when one exists, and a road that only runs through
         // a town is still a road: a hard block would strand reds in pockets
         // of the graph and hand us the marooning bug instead.
-        private const double GuardedDetourCost = 30.0;
+        //
+        // The multiplier applies to every leg INTO a guarded node, so at 30
+        // a town crossing of three short legs cost about the same as one
+        // long wilderness leg — and Dijkstra took the town. Four reds died
+        // on the Sacrifice trail through east Vesper in one soak that way.
+        // At 200 the detour wins whenever the graph offers one at all.
+        private const double GuardedDetourCost = 200.0;
 
         private static HashSet<string> _guardedWaypoints;
 
@@ -182,6 +188,90 @@ namespace Server.CustomBots
             }
 
             return _guardedWaypoints.Contains(name);
+        }
+
+        // A node learned the hard way. The boot-time sweep only tests each
+        // waypoint's own tile, so a leg whose ends both stand just outside
+        // the watch but whose road runs through it is invisible to it. When
+        // a red finds itself under guards mid-leg, the Traveler names the
+        // leg's ends here, and no red is routed over them again.
+        public static void MarkGuardedWaypoint(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+            IsGuardedWaypoint(name); // build the set if it is not built yet
+            if (_guardedWaypoints.Add(name))
+            {
+                Console.WriteLine(
+                    $"[RedTerritory] '{name}' learned as a guarded approach; " +
+                    $"murderers will route around it.");
+            }
+        }
+
+        // Is this mobile standing where the watch turns out? Asked per tick
+        // for every red, so it reads the region already resolved on the
+        // mobile and never touches the destination cache — the cache is
+        // keyed by exact tile, and feeding it live positions would grow it
+        // by one entry per step.
+        public static bool IsUnderGuards(Mobile m)
+        {
+            var region = m?.Region?.GetRegion<GuardedRegion>();
+            return region != null && !region.IsDisabled();
+        }
+
+        // Probe the eight compass directions a few tiles out and return the
+        // first that leaves the watch. Shared by the PK patrol and the
+        // Traveler's own bailout.
+        public static Direction? FindUnguardedDirection(Mobile m, int probe = 6)
+        {
+            if (m?.Map == null)
+            {
+                return null;
+            }
+
+            Direction[] dirs =
+            {
+                Direction.North, Direction.East, Direction.South, Direction.West,
+                Direction.Right, Direction.Down, Direction.Left, Direction.Up,
+            };
+            int[] dx = { 0, 1, 0, -1, 1, 1, -1, -1 };
+            int[] dy = { -1, 0, 1, 0, -1, 1, 1, -1 };
+
+            for (int i = 0; i < dirs.Length; i++)
+            {
+                var p = new Point3D(m.X + dx[i] * probe, m.Y + dy[i] * probe, m.Z);
+                var region = Region.Find(p, m.Map)?.GetRegion<GuardedRegion>();
+                if (region == null || region.IsDisabled())
+                {
+                    return dirs[i];
+                }
+            }
+            return null;
+        }
+
+        // Does this plan walk a red under the watch at any point? Cost
+        // alone cannot answer it: Britain sits on the only road from its
+        // south side to its west side, so with no bypass in the graph the
+        // cheapest route is STILL through the gate, and six reds in one
+        // soak walked "WP 55, WP 49, WP 48" to their deaths that way. A
+        // plan that crosses a guarded node is not a road for a murderer —
+        // the caller treats it like water and recalls, or picks elsewhere.
+        public static bool PathCrossesGuards(List<string> path)
+        {
+            if (path == null)
+            {
+                return false;
+            }
+            foreach (var name in path)
+            {
+                if (IsGuardedWaypoint(name))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Hand this to WaypointGraph.FindPath. Null for anyone the guards do

@@ -7,20 +7,26 @@
 //            novices misjudge fights and sometimes don't make it out.
 //   HAUNT    The ghost lingers at the corpse a while (GhostBehavior),
 //            drifting and moaning OoOoOo at passers-by.
-//   WALK     Surface deaths: the ghost walks — really walks — to the
-//            nearest healer or shrine (a Traveler trip while dead; the
-//            shrines we placed finally have their true job). Dungeon
-//            deaths, or deaths with no reachable res point, get found
-//            by "a wandering healer" after the haunt (res in place).
-//   RES      Sparkle + sound, death robe, half health.
+//   HELP     Anyone living with the skill can raise it on the spot —
+//            Resurrection off a mage, bandages off a healer or a
+//            grandmaster dexxer (BotResurrectAid).
+//   CLIMB    Died underground? The ghost walks OUT (GhostExitBehavior):
+//            nearest up-stair on this floor, ride it, repeat, surface.
+//   WALK     Then the ghost walks — really walks — to the nearest healer
+//            or shrine (a Traveler trip while dead; the shrines we placed
+//            finally have their true job).
+//   RES      At a REAL ankh or a REAL healer NPC standing there. Sparkle
+//            + sound, death robe, half health. Nothing resurrects out of
+//            thin air any more; the only exception is the long stranding
+//            net at the very bottom of this file.
 //   CORPSE   Then the corpse run: travel back to the death spot hoping
 //   RUN      the loot's still there. ReclaimCorpse takes the gear back
 //            (vanilla self-loot is AOS-only — see the note on it). If the
 //            corpse rotted or was looted: "WHO LOOTED MY CORPSE" — and a
 //            fresh kit, because a naked bot forever is a bug, not a story.
 //
-// The flow spans several behaviors (Ghost → Traveler-as-ghost →
-// CorpseReclaim → back to normal life); this manager holds the shared
+// The flow spans several behaviors (Ghost → GhostExit → Traveler-as-ghost
+// → CorpseReclaim → back to normal life); this manager holds the shared
 // steps and the decisions between them.
 // =========================================================================
 
@@ -47,14 +53,23 @@ namespace Server.CustomBots
         // at the corpse.
         public const int CorpseApproachRange = 30;
 
-        // Hard ceiling on total ghost time. A ghost whose res walk wedges
-        // (stuck route, blocked gate — first soak: a ghost looping at
-        // Trinsic's WP 212 forever) gets found by a wandering healer ON
-        // THE SPOT. The death story must never strand a bot permanently.
-        public static readonly TimeSpan GhostRescueAfter = TimeSpan.FromMinutes(10);
+        // Hard ceiling on total ghost time. A ghost whose route wedges
+        // (blocked stairs, a gate that never fires — first soak: a ghost
+        // looping at Trinsic's WP 212 forever) has to end up somewhere.
+        // The death story must never strand a bot permanently.
+        //
+        // Twenty minutes, not ten, because a ghost now has real work to
+        // do first: climb out of a dungeon, then cross the map on foot to
+        // a healer. Ten minutes fired in the middle of an honest climb.
+        public static readonly TimeSpan GhostRescueAfter = TimeSpan.FromMinutes(20);
 
-        // Called by TravelerBehavior's tick while dead. True = rescued
-        // (resurrected in place; behavior swapped — caller returns).
+        // Called by TravelerBehavior's tick while dead, and by the ghost
+        // behaviors. True = handled (behavior swapped — caller returns).
+        //
+        // This no longer stands the bot up out of nowhere. It carries the
+        // ghost to the nearest res point it could not reach on its own and
+        // raises it THERE, so even the rescue puts the bot at an ankh
+        // instead of in the middle of a field.
         public static bool CheckGhostRescue(PlayerBot bot)
         {
             if (bot.Alive ||
@@ -63,15 +78,139 @@ namespace Server.CustomBots
             {
                 return false;
             }
-            ResurrectBot(bot, "wandering healer found the wedged ghost");
+
+            var refuge = NearestResPoint(bot);
+            if (refuge != null)
+            {
+                Console.WriteLine(
+                    $"[death] {bot.Name}'s ghost never made it — carried to " +
+                    $"'{refuge.Name}'");
+                bot.MoveToWorld(refuge.ArrivalPoint ?? refuge.Location, bot.Map);
+            }
+
+            ResurrectBot(bot, "wedged ghost, carried to a res point");
             return true;
+        }
+
+        // -------------------------------------------------------------------
+        // Real resurrection sites — an ANKH you can touch and a HEALER who
+        // is actually standing there. This is what replaced the off-screen
+        // "wandering healer": nothing raises a bot unless one of these (or
+        // another bot with the skill) is genuinely within reach.
+        // -------------------------------------------------------------------
+
+        // Ankhs.ResurrectRange. A healer NPC offers at 4 (BaseHealer's
+        // OnMovement check), so the ghost only has to get near.
+        public const int AnkhResRange   = 2;
+        public const int HealerResRange = 4;
+
+        // How far a ghost will look around for one of the above once it has
+        // arrived somewhere that ought to have one.
+        public const int ResSiteSearchRange = 24;
+
+        // A real healer NPC willing to raise THIS bot, or null. The engine's
+        // own CheckResurrect does the deciding, so a murderer gets told
+        // "thou'rt not a decent and good person" and stays a ghost — which
+        // is exactly why reds are routed to shrines instead.
+        public static BaseHealer FindHealerNpc(PlayerBot bot, int range)
+        {
+            if (bot?.Map == null || bot.Map == Map.Internal)
+            {
+                return null;
+            }
+
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, range))
+            {
+                if (m is BaseHealer h && h.Alive && !h.Deleted &&
+                    h.CheckResurrect(bot))
+                {
+                    return h;
+                }
+            }
+            return null;
+        }
+
+        // A real ankh item in range. Rejuvination ankhs are a different
+        // class and don't resurrect, so they can't match here.
+        public static Item FindAnkh(PlayerBot bot, int range)
+        {
+            if (bot?.Map == null || bot.Map == Map.Internal)
+            {
+                return null;
+            }
+
+            foreach (var item in bot.Map.GetItemsInRange(bot.Location, range))
+            {
+                if (item is AnkhNorth or AnkhWest && !item.Deleted)
+                {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        // Something in reach RIGHT NOW that can raise this ghost. Returns a
+        // description for the log line, or null.
+        public static string ResurrectorInReach(PlayerBot bot)
+        {
+            if (FindAnkh(bot, AnkhResRange) != null)
+            {
+                return "touched the ankh";
+            }
+
+            var healer = FindHealerNpc(bot, HealerResRange);
+            return healer != null ? $"{healer.Name} the healer" : null;
+        }
+
+        // The tile a ghost should float the last few steps to. Null when
+        // there's nothing worth walking to nearby.
+        public static Point3D? FindResSite(PlayerBot bot, int range = ResSiteSearchRange)
+        {
+            var ankh = FindAnkh(bot, range);
+            if (ankh != null)
+            {
+                return ankh.GetWorldLocation();
+            }
+
+            var healer = FindHealerNpc(bot, range);
+            return healer?.Location;
+        }
+
+        // Nearest destination that is supposed to HAVE a res site, used by
+        // the stranding net. Shrines and healers only; red rules apply.
+        private static BotDestination NearestResPoint(PlayerBot bot)
+        {
+            BotDestination best = null;
+            int bestDist = int.MaxValue;
+
+            foreach (var d in DestinationCatalog.All)
+            {
+                if (d.Type != DestinationType.Healer && d.Type != DestinationType.Shrine)
+                {
+                    continue;
+                }
+                if (!RedTerritory.MayGoTo(bot, d))
+                {
+                    continue;
+                }
+
+                int dist = Math.Max(Math.Abs(d.Location.X - bot.X),
+                                    Math.Abs(d.Location.Y - bot.Y));
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = d;
+                }
+            }
+
+            return best;
         }
 
         // -------------------------------------------------------------------
         // OnBotDeath — called from PlayerBot.OnDeath after the journal
         // entry. Starts the ghost flow.
         // -------------------------------------------------------------------
-        public static void OnBotDeath(PlayerBot bot, Mobile killer)
+        public static void OnBotDeath(PlayerBot bot, Mobile killer, string how = null)
         {
             if (!Enabled || bot == null || bot.Deleted)
             {
@@ -90,9 +229,10 @@ namespace Server.CustomBots
             }
             bot.RecentDeaths++;
             bot.LastDeathAt = Core.Now;
+            bot.LastKiller = killer;
 
             Console.WriteLine(
-                $"[death] {bot.Name} was killed by {killer?.Name ?? "something"} " +
+                $"[death] {bot.Name} was killed by {how ?? killer?.Name ?? "something"} " +
                 $"at ({bot.X},{bot.Y}) — ghost rises");
 
             bot.Behavior = new GhostBehavior();
@@ -137,11 +277,29 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         public static string PickResDestination(PlayerBot bot)
         {
+            // Underground has no answer of its own — dungeons have almost
+            // no ankhs and no healers. GhostExitBehavior walks the ghost
+            // up and out first, and only then is this asked.
             if (DungeonRegistry.IsInDungeon(bot))
             {
-                return null; // dungeons res in place (the level's ankh)
+                return null;
             }
 
+            // Two passes. The first keeps the walk sane; the second drops
+            // the distance cap when nothing at all qualified, because
+            // "nowhere to go" leaves the ghost standing in a field until
+            // the stranding net. That is the murderers' case in
+            // particular: the healer on every town corner refuses them
+            // (BaseHealer.CheckResurrect), so a red's only res is the
+            // shrines, and the shrines are deliberately far from
+            // everywhere. A red walking half the map to Compassion is the
+            // era working, not a bug.
+            return PickResDestination(bot, MaxResWalkDistance)
+                ?? PickResDestination(bot, int.MaxValue);
+        }
+
+        private static string PickResDestination(PlayerBot bot, int maxDist)
+        {
             var graph = WaypointRegistry.Graph;
             var botNode = graph.FindNearestNode(bot.Location);
             int botComp = botNode != null ? graph.ComponentOf(botNode.Name) : -1;
@@ -166,7 +324,7 @@ namespace Server.CustomBots
 
                 int dist = Math.Max(Math.Abs(d.Location.X - bot.X),
                                     Math.Abs(d.Location.Y - bot.Y));
-                if (dist >= bestDist || dist > MaxResWalkDistance)
+                if (dist >= bestDist || dist > maxDist)
                 {
                     continue;
                 }
@@ -315,14 +473,44 @@ namespace Server.CustomBots
 
         // Called at the top of TravelerBehavior.HandleArrival. A DEAD
         // traveler arriving anywhere is a ghost completing its res walk.
+        //
+        // Arriving is no longer the same thing as being raised. The
+        // waypoint puts the ghost at the door; the ankh or the healer is
+        // the last few tiles past it, and the ghost has to reach one. Only
+        // when there is genuinely nothing here does it fall back to
+        // standing up on the spot — which now shows in the log as a fault,
+        // because it means the destination is mis-authored.
         public static bool OnTravelerArrival(PlayerBot bot)
         {
-            if (!bot.Alive)
+            if (bot.Alive)
             {
-                ResurrectBot(bot, "reached a healer");
+                return false;
+            }
+
+            var how = ResurrectorInReach(bot);
+            if (how != null)
+            {
+                ResurrectBot(bot, how);
                 return true; // behavior was swapped by the corpse-run start
             }
-            return false;
+
+            var site = FindResSite(bot);
+            if (site.HasValue)
+            {
+                Console.WriteLine(
+                    $"[death] {bot.Name}'s ghost is at the door — closing on " +
+                    $"the ankh/healer at {site.Value}");
+                bot.Behavior = new GhostBehavior { SeekSite = site };
+                return true;
+            }
+
+            Console.WriteLine(
+                $"[death] {bot.Name} arrived at a res point with no ankh and no " +
+                $"healer in {ResSiteSearchRange} tiles — check the destination");
+            StuckTelemetry.Record(bot, "res_site_missing",
+                $"no ankh/healer at ({bot.X},{bot.Y})");
+            ResurrectBot(bot, "no res site here");
+            return true;
         }
 
         // Called each Traveler tick while CorpseRunPending: break off the

@@ -1,10 +1,7 @@
-# Gossip/party.txt — retelling a hunting party setting out.
-# {actor} = leader, {other} = the dungeon, {place} = where they formed, {when}.
-
 {actor} took a group to {other} {when}
 {actor} is running {other} with a group
-saw {actor}'s party heading to {other} {when}
+saw {actor}'s party heading for {other}
 {actor} got a group together for {other}
-theres a hunt on at {other}, {actor} leading
-missed {actor}'s {other} run, they left {when}
+theres a hunt on at {other}. {actor} is leading
+missed {actor}'s {other} run. left {when}
 {actor} and friends went to {other}. brave

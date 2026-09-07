@@ -42,6 +42,10 @@ namespace Server.CustomBots
             // haunt; alive → corpse run). "CorpseReclaim" from a stale save
             // maps to Traveler — the corpse it knew is long gone.
             Register("Ghost",         () => new GhostBehavior());
+            // A ghost reloaded mid-climb re-derives its floor on the first
+            // tick (TryRecoverContext), and surfaces to a plain Ghost if it
+            // turns out not to be underground at all.
+            Register("GhostExit",     () => new GhostExitBehavior());
             Register("CorpseReclaim", () => new TravelerBehavior());
             // Street characters + gatherers + duelists. A Duelist loaded
             // from a save has no duel (they're transient) — its Tick

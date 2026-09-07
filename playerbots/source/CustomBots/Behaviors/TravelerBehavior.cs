@@ -82,7 +82,20 @@ namespace Server.CustomBots
         // planning, we consider them "lost" and teleport-rescue them onto
         // the graph. Larger than PathFollower's 38-tile A* range, with
         // buffer for terrain irregularities.
-        public int MaxApproachDistance { get; set; } = 50;
+        // The A* search window, minus a little slack for the fact that the
+        // bot keeps moving while this is being decided. NOT a free choice:
+        // BitmapAStarAlgorithm.CheckCondition refuses to even attempt a
+        // path beyond WaypointGraph.MaxLegDistance tiles, so a bot further
+        // out than this cannot be routed at all.
+        //
+        // This was 50, under a comment that already said the limit was 38.
+        // A bot sitting 39-50 tiles from the nearest node therefore fell in
+        // the gap: too close to be rescued, too far for A* to answer. Every
+        // one of those got the blind fallback in PathFollower.Follow, which
+        // steps straight at the goal when it has no path — into whatever
+        // wall is in the way, then the stuck ladder repicks, it turns
+        // around, comes back, and repeats. That is the bouncing.
+        public int MaxApproachDistance { get; set; } = WaypointGraph.MaxLegDistance - 2;
 
         // ---- State ----
         public string DestinationName { get; set; }
@@ -158,6 +171,22 @@ namespace Server.CustomBots
         // last waypoint's tile. Null means "use the waypoint coord with
         // the per-bot offset above" (legacy / fallback path).
         private Point3D? _finalCoord;
+
+        // Where the feet are actually headed this beat, for the fleet-wide
+        // nav watchdog (BotNavWatch). The PathFollower's own goal is the
+        // truest answer there is — it is the tile the next step aims at,
+        // whether that is a leg waypoint, the post-arrival drift, or a
+        // dungeon entrance pad. Null once arrived, or while a Recall/gate
+        // sequence owns the bot, because standing still is correct then.
+        public override Point3D? NavGoal(PlayerBot bot)
+        {
+            if (_hasArrived || _magicTravelPending || _moongateTripPending ||
+                _follower == null)
+            {
+                return null;
+            }
+            return _follower.GetGoalLocation();
+        }
 
         private PathFollower _follower;
         private bool _running;
@@ -597,6 +626,13 @@ namespace Server.CustomBots
                 {
                     continue;
                 }
+                // "Wild" is not the same as "safe for a red": a dig site
+                // can sit inside a town's watch, and a rescue that drops a
+                // murderer there is an execution. Four died on one tile.
+                if (RedTerritory.IsRed(bot) && RedTerritory.IsGuardedPlace(d, bot.Map))
+                {
+                    continue;
+                }
                 fallback ??= d;
                 if (myComp >= 0 && !string.IsNullOrEmpty(d.NearestWaypoint) &&
                     graph.ComponentOf(d.NearestWaypoint) == myComp)
@@ -806,6 +842,18 @@ namespace Server.CustomBots
             // Traveler; this one just has to not wander off the spot.
             if (_magicTravelPending) return;
 
+            // A murderer under the watch is dead in seconds, and this is
+            // the only brain that reliably notices. The PK patrol has its
+            // own get-out-of-town check, but while a trip is being walked
+            // it is THIS tick that runs, and reds walked "WP 55, WP 49,
+            // WP 48" into Britain and were cut down at the gate — eight of
+            // one soak's thirty-one deaths were reds under guards.
+            if (bot.Alive && RedTerritory.IsRed(bot) && RedTerritory.IsUnderGuards(bot))
+            {
+                RedTownBailout(bot);
+                return;
+            }
+
             // -- Trip progress watchdog --
             // The stuck-recovery ladder can starve forever: a hard-blocked
             // bot repaths, instantly "reaches" hop-0 (the node it's already
@@ -872,8 +920,24 @@ namespace Server.CustomBots
             // before doing anything else.
             if (DungeonEntryCheck(bot)) return;
 
+            // A ghost mid-walk that passes an ankh, or bumps into one of
+            // the wandering healers who really do roam Felucca, is raised
+            // right there — it doesn't march past a res to reach the one
+            // it picked.
+            if (!bot.Alive)
+            {
+                var how = BotDeathManager.ResurrectorInReach(bot);
+                if (how != null)
+                {
+                    StopStepTimer();
+                    BotDeathManager.ResurrectBot(bot, how);
+                    return; // behavior swapped to the corpse run
+                }
+            }
+
             // Ghost overdue for its res (wedged route, blocked gate...) —
-            // a wandering healer finds it right here. Bounded death story.
+            // carried to the nearest res point and raised there. Bounded
+            // death story.
             if (!bot.Alive && BotDeathManager.CheckGhostRescue(bot))
             {
                 return; // resurrected; behavior swapped to the corpse run
@@ -1146,6 +1210,66 @@ namespace Server.CustomBots
         // PlanPath — find nearest graph node from current position, then
         // Dijkstra to the destination. Stores the result in _plannedPath.
         // -------------------------------------------------------------------
+        // How many times this trip has had to be pulled back out of a town.
+        private int _townBailouts;
+
+        // Get a red back out from under the guards, teach the graph which
+        // leg led it in, and plan again. The boot-time sweep flags only a
+        // waypoint's own tile, so a road that merely CROSSES the watch
+        // between two wilderness nodes is invisible to it — the ends of the
+        // leg being walked are named guarded here so the next plan detours.
+        // A trip that keeps leading back in is not worth the walk: after a
+        // few of these the destination is dropped for another.
+        private void RedTownBailout(PlayerBot bot)
+        {
+            StopStepTimer();
+
+            if (_plannedPath != null && _plannedPath.Count > 0)
+            {
+                int to = Math.Clamp(_legIndex, 0, _plannedPath.Count - 1);
+                RedTerritory.MarkGuardedWaypoint(_plannedPath[to]);
+                if (to > 0)
+                {
+                    RedTerritory.MarkGuardedWaypoint(_plannedPath[to - 1]);
+                }
+            }
+
+            // What a real murderer does when the watch turns out: Kal Ort
+            // Por, now. The trip continues from wherever the rune lands.
+            if (_finalCoord.HasValue && !BotPartyManager.IsInParty(bot) &&
+                MagicTravel.TryBeginTrip(bot, DestinationName, _finalCoord.Value, _destType))
+            {
+                _magicTravelPending = true;
+                Log(bot, $"red under guards at ({bot.X},{bot.Y}) — recalling out");
+                return;
+            }
+
+            // No recall — run. Two steps a tick is a stroll and a guard
+            // teleports; this is a burst, out to the probe distance.
+            var outDir = RedTerritory.FindUnguardedDirection(bot);
+            if (outDir.HasValue)
+            {
+                if (bot.Direction != outDir.Value) bot.Direction = outDir.Value;
+                for (int i = 0; i < 6 && bot.Move(outDir.Value); i++)
+                {
+                }
+            }
+
+            _townBailouts++;
+            if (_townBailouts >= 3)
+            {
+                Log(bot, "under guards for the third time this trip — " +
+                         "giving up the destination");
+                _townBailouts = 0;
+                PickNewDestination(bot);
+                return;
+            }
+
+            Log(bot, $"red under guards at ({bot.X},{bot.Y}) — backing out and " +
+                     $"replanning around the town (bailout {_townBailouts}/3)");
+            PlanPath(bot);
+        }
+
         private void PlanPath(PlayerBot bot)
         {
             var graph = WaypointRegistry.Graph;
@@ -1174,9 +1298,13 @@ namespace Server.CustomBots
             // A* has a 38-tile search radius, so anything beyond that is
             // unreachable. The bot is "lost"; teleport them onto the graph
             // at the nearest waypoint and continue planning from there.
-            int rdx = bot.X - nearest.Location.X;
-            int rdy = bot.Y - nearest.Location.Y;
-            int rDist = (int)Math.Sqrt(rdx * rdx + rdy * rdy);
+            // Chebyshev, because that is the metric the thing we are
+            // guarding against uses (Utility.InRange). Euclidean disagreed
+            // with A* on every diagonal — (30,30) is 30 tiles to A* and 42
+            // here — so the two never quite meant the same thing.
+            int rdx = Math.Abs(bot.X - nearest.Location.X);
+            int rdy = Math.Abs(bot.Y - nearest.Location.Y);
+            int rDist = Math.Max(rdx, rdy);
             if (rDist > MaxApproachDistance)
             {
                 Log(bot, $"LOST — {rDist} tiles from nearest waypoint '{nearest.Name}'; teleporting to rescue");
@@ -1268,6 +1396,49 @@ namespace Server.CustomBots
 
             _plannedPath = graph.FindPath(nearest.Name, routeTargetWaypoint,
                 RedTerritory.RouteCost(bot));
+
+            // For a murderer, a road through a town is no road. The cost
+            // above buys a detour when the graph has one; when it does not
+            // (Britain straddles the only south-to-west road) the plan is
+            // dropped here and the water logic below takes over — recall if
+            // it can, otherwise somewhere else.
+            if (_plannedPath != null && _plannedPath.Count > 0 &&
+                RedTerritory.IsRed(bot) && RedTerritory.PathCrossesGuards(_plannedPath))
+            {
+                // Recall over it if the bot can. Otherwise pick somewhere a
+                // red can actually walk to — the salvage below already
+                // knows a town road does not count — rather than dropping
+                // into the island logic, which ends with the bot declaring
+                // itself "already at" a place it never reached.
+                if (_planDepth == 0 && _finalCoord.HasValue &&
+                    !BotPartyManager.IsInParty(bot) &&
+                    MagicTravel.TryBeginTrip(bot, DestinationName, _finalCoord.Value, _destType))
+                {
+                    _magicTravelPending = true;
+                    StopStepTimer();
+                    _plannedPath = new List<string>();
+                    Log(bot, $"the only road to '{DestinationName}' runs under guards — " +
+                             "recalling instead");
+                    return;
+                }
+
+                var elsewhere = _planDepth == 0 ? PickReachableDestination(bot, nearest.Name) : null;
+                if (elsewhere != null && elsewhere != DestinationName)
+                {
+                    Log(bot, $"the only road to '{DestinationName}' runs under guards — " +
+                             $"going to '{elsewhere}' instead");
+                    DestinationName = elsewhere;
+                    _gateResumeDestination = null;
+                    _planDepth++;
+                    PlanPath(bot);
+                    _planDepth--;
+                    return;
+                }
+
+                Log(bot, $"the only road to '{DestinationName}' runs under guards — " +
+                         "not walking it");
+                _plannedPath = new List<string>();
+            }
 
             // ----- island reroute (WaypointGraph-based) -------------------
             // If FindPath to the destination came back empty, the bot and its
@@ -1591,7 +1762,11 @@ namespace Server.CustomBots
 
                 var path = graph.FindPath(fromNode, wp,
                     RedTerritory.RouteCost(bot));
-                if (path != null && path.Count > 0)
+                // Walkable is not enough for a murderer: a road through a
+                // town is a road to the gallows, and salvaging onto one just
+                // repeats the block that sent us here.
+                if (path != null && path.Count > 0 &&
+                    !(RedTerritory.IsRed(bot) && RedTerritory.PathCrossesGuards(path)))
                 {
                     return cand;
                 }
@@ -3079,7 +3254,13 @@ private bool ZoneArrival(PlayerBot bot, int fallbackRange)
 
         private void StepOnce(PlayerBot bot)
         {
-            if (bot.Deleted || !bot.Alive || bot.Map == null || bot.Map == Map.Internal)
+            // NOT gated on Alive. A dead Traveler is a ghost walking to a
+            // healer, and this gate is why none of them ever arrived: the
+            // whole leg machinery ran, the ghost never took a step, and
+            // ten minutes later the rescue net stood it up wherever it was
+            // standing. Every "sets off for a healer" in the soak log ended
+            // that way.
+            if (bot.Deleted || bot.Map == null || bot.Map == Map.Internal)
             {
                 StopStepTimer();
                 return;

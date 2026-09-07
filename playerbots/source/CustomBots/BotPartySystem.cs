@@ -87,6 +87,13 @@ namespace Server.CustomBots
         public DateTime FormedAt;
         public DateTime StateSince;
 
+        // Times the leader's trip has been re-issued after it wandered
+        // off-plan (stuck-watchdog gave the trip up, a rescue re-aimed
+        // it). A party of five walked out of Britain and dissolved on the
+        // road because its leader got stuck on one waypoint and dropped
+        // the trip; the four behind it went home.
+        public int ReAims;
+
         public void SetState(BotPartyState s)
         {
             State = s;
@@ -112,15 +119,16 @@ namespace Server.CustomBots
 
         public static bool Enabled = true;
 
-        public const int MaxParties = 3;   // hunts
-        public const int MaxConvoys = 3;
-        public const int MaxWarbands = 2;
-
+        // Caps scale with the population. At sixteen hundred bots a flat
+        // three hunts shard-wide meant a party was something you read
+        // about; an eight-minute soak formed two, both of two people.
+        public static int MaxParties  => Math.Max(3, BotPopulation.TargetCount / 120);
+        public static int MaxConvoys  => Math.Max(3, BotPopulation.TargetCount / 200);
+        public static int MaxWarbands => Math.Max(2, BotPopulation.TargetCount / 400);
         // Formation attempts happen this often (each attempt may fail —
         // no eligible leader, nobody answered the LFG).
-        private static readonly TimeSpan FormAttemptMin = TimeSpan.FromMinutes(3);
-        private static readonly TimeSpan FormAttemptMax = TimeSpan.FromMinutes(8);
-
+        private static readonly TimeSpan FormAttemptMin = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan FormAttemptMax = TimeSpan.FromMinutes(3);
         // Convoys form a bit more readily (they're cheap, short outings);
         // war bands are rarer — a patrol should feel like an event.
         private static readonly TimeSpan ConvoyAttemptMin = TimeSpan.FromMinutes(3);
@@ -129,8 +137,17 @@ namespace Server.CustomBots
         private static readonly TimeSpan WarbandAttemptMax = TimeSpan.FromMinutes(15);
 
         // How far the LFG broadcast recruits from.
-        private const int RecruitRange = 20;
+        private const int RecruitRange = 30;
 
+        // How many answer the LFG. Two to four: a party of two is a pair
+        // of friends, and a pair loses to the first gank crew it meets.
+        private const int RecruitMin = 2;
+        private const int RecruitMax = 4;
+
+        // A fallen partymate is carried for this long while someone in
+        // the party who can raise them tries to. After that, the party
+        // moves on without them.
+        private static readonly TimeSpan FallenGrace = TimeSpan.FromMinutes(3);
         // Guildmates answer a hunt LFG from farther across the plaza —
         // the guild grapevine carries better than a shout.
         private const int GuildRecruitRange = 40;
@@ -293,12 +310,40 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         private static void AdvanceParty(BotParty party)
         {
-            // Drop deleted/dead members quietly (they died or logged off —
-            // it happens to every group).
-            party.Members.RemoveAll(m => m == null || m.Deleted || !m.Alive);
+            party.Members.RemoveAll(m => m == null || m.Deleted);
+
+            // A party with a healer or a mage in it raises its dead — that
+            // is half of why anyone brought one. A fallen member is kept
+            // on the roll for a grace window while a partymate who can
+            // tries; only then is it dropped. It used to be dropped the
+            // tick it died, and a party of two ended the moment one of
+            // them did.
+            TendTheFallen(party);
+            party.Members.RemoveAll(m => !m.Alive &&
+                Core.Now - (m.LastDeathAt) > FallenGrace);
 
             var leader = party.Leader;
-            bool leaderGone = leader == null || leader.Deleted || !leader.Alive;
+            bool leaderGone = leader == null || leader.Deleted;
+            bool leaderDead = !leaderGone && !leader.Alive;
+
+            // The leader is down. The party is not over: if someone can
+            // raise them the grace window covers it; otherwise the walk
+            // continues under whoever is standing. Helga's party went
+            // home because Helga died, with a live partymate standing
+            // next to the reds who did it.
+            if (leaderDead && Core.Now - leader.LastDeathAt > FallenGrace)
+            {
+                leaderGone = true;
+            }
+            if (leaderGone && party.Kind == BotPartyKind.Hunt)
+            {
+                var heir = PromoteLeader(party);
+                if (heir != null)
+                {
+                    leaderGone = false;
+                    leader = heir;
+                }
+            }
 
             var maxLife = party.Kind switch
             {
@@ -306,11 +351,31 @@ namespace Server.CustomBots
                 BotPartyKind.Warband => WarbandMaxLife,
                 _                    => PartyMaxLife,
             };
-            if (leaderGone || party.Members.Count == 0 ||
+            int standing = 0;
+            foreach (var m in party.Members)
+            {
+                if (m.Alive) standing++;
+            }
+            if (leaderGone || standing == 0 ||
                 Core.Now - party.FormedAt > maxLife)
             {
                 Disband(party, sayGoodbyes: !leaderGone);
                 return;
+            }
+            if (leaderDead)
+            {
+                return; // waiting on a res; nothing to advance
+            }
+
+            // A member raised mid-hunt goes through the corpse run and
+            // comes out the far side a plain Traveler. It is still on the
+            // roll, so it is still ours: hand the party brain back.
+            foreach (var m in party.Members)
+            {
+                if (m.Alive && m.Behavior is TravelerBehavior && m != leader)
+                {
+                    m.Behavior = new PartyMemberBehavior();
+                }
             }
 
             switch (party.State)
@@ -337,6 +402,10 @@ namespace Server.CustomBots
             bool allClose = true;
             foreach (var m in party.Members)
             {
+                if (!m.Alive)
+                {
+                    continue;
+                }
                 if (m.Map != leader.Map || !m.InRange(leader.Location, 6))
                 {
                     allClose = false;
@@ -386,14 +455,15 @@ namespace Server.CustomBots
             }
 
             var leader = party.Leader;
-
             if (DungeonRegistry.IsInDungeon(leader))
             {
                 party.LandingSpot = leader.Location;
                 party.SetState(BotPartyState.Entering);
+                Console.WriteLine(
+                    $"[party] {leader.Name}'s party reached {party.Target?.Dungeon} " +
+                    $"({party.Members.Count + 1} bots) — entering");
                 return;
             }
-
             PortStragglers(party);
 
             // Leader wandered off-plan? (entrance pad dead → Traveler picked
@@ -403,6 +473,17 @@ namespace Server.CustomBots
                 leader.Behavior is TravelerBehavior t &&
                 !string.Equals(t.DestinationName, party.Target.Name, StringComparison.OrdinalIgnoreCase))
             {
+                if (party.ReAims < 2)
+                {
+                    party.ReAims++;
+                    leader.Behavior = new TravelerBehavior { DestinationName = party.Target.Name };
+                    party.SetState(BotPartyState.Marching);
+                    Console.WriteLine(
+                        $"[party] {leader.Name} lost the road to {party.Target.Dungeon} " +
+                        $"(was heading for '{t.DestinationName}') — re-aiming " +
+                        $"({party.ReAims}/2)");
+                    return;
+                }
                 Disband(party, sayGoodbyes: true);
                 return;
             }
@@ -429,6 +510,9 @@ namespace Server.CustomBots
             if (party.Target != null && leader.Map != null &&
                 leader.InRange(party.Target.Location, RoamArriveRange))
             {
+                Console.WriteLine(
+                    $"[party] {party.Kind} arrived at {party.Target.Name} " +
+                    $"({party.Members.Count + 1} bots) — dispersing");
                 Disband(party, sayGoodbyes: true);
                 return;
             }
@@ -507,6 +591,8 @@ namespace Server.CustomBots
             if (allInside)
             {
                 party.SetState(BotPartyState.Crawling);
+                Console.WriteLine(
+                    $"[party] {leader.Name}'s party is all inside {party.Target?.Dungeon} — crawling");
             }
         }
 
@@ -581,10 +667,17 @@ namespace Server.CustomBots
         private static bool IsRecruitable(BotClass c) =>
             IsFighter(c) || c is BotClass.Healer or BotClass.Bard or BotClass.Tamer;
 
+        // A murderer never leads or joins a hunt. "Jareth the Red" led a
+        // party of blues to Covetous and spent the march being attacked
+        // by every blue on the road, then died to his own reflected
+        // spell inside; his partymate had nothing to assist with because
+        // the people on his leader were the people it would normally
+        // hunt. Reds have their own gangs.
         private static bool IsEligible(PlayerBot bot) =>
             bot != null && !bot.Deleted && bot.Alive &&
             !bot.LifecycleExempt && !bot.LoggingOut &&
             bot.Combatant == null &&
+            !RedTerritory.IsRed(bot) &&
             !DungeonRegistry.IsInDungeon(bot) &&
             !IsInParty(bot);
 
@@ -616,8 +709,25 @@ namespace Server.CustomBots
             {
                 return null;
             }
-            var leader = candidates[Utility.Random(candidates.Count)];
 
+            // One random bank may be empty of anyone who would answer.
+            // Try a few before calling it a quiet night; half the forced
+            // formations in one soak came back "nobody answered" on the
+            // first bank they looked at.
+            Shuffle(candidates);
+            for (int attempt = 0; attempt < Math.Min(5, candidates.Count); attempt++)
+            {
+                var party = TryFormAround(candidates[attempt]);
+                if (party != null)
+                {
+                    return party;
+                }
+            }
+            return null;
+        }
+
+        private static BotParty TryFormAround(PlayerBot leader)
+        {
             // 2. Target dungeon: an entrance on the leader's own landmass,
             //    close enough to march to.
             var target = PickDungeonFor(leader);
@@ -674,7 +784,7 @@ namespace Server.CustomBots
                 : 0;
             recruits.Sort((a, b) => Affinity(b).CompareTo(Affinity(a)));
 
-            int take = Math.Min(recruits.Count, Utility.RandomMinMax(1, 3));
+            int take = Math.Min(recruits.Count, Utility.RandomMinMax(RecruitMin, RecruitMax));
 
             var party = new BotParty
             {
@@ -1126,6 +1236,87 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         // Disband — goodbyes, friendships, and back to ordinary life.
         // -------------------------------------------------------------------
+        // Every dead partymate gets one attempt per tick from the nearest
+        // partymate who can raise them and is not busy. The ghost has to
+        // be near enough — the aid code will not cast across a floor.
+        private static void TendTheFallen(BotParty party)
+        {
+            foreach (var ghost in party.Everyone())
+            {
+                if (ghost == null || ghost.Deleted || ghost.Alive)
+                {
+                    continue;
+                }
+                foreach (var aider in party.Everyone())
+                {
+                    if (aider == null || aider == ghost || aider.Deleted || !aider.Alive ||
+                        !BotResurrectAid.CanAid(aider) || !BotResurrectAid.Willing(aider, ghost))
+                    {
+                        continue;
+                    }
+                    if (BotResurrectAid.TryAid(aider, ghost))
+                    {
+                        Console.WriteLine(
+                            $"[party] {aider.Name} raises partymate {ghost.Name}");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // The first living member takes the lead. Marching: a fresh
+        // Traveler to the same entrance. Crawling: a crawler that picks
+        // its floor up from where it stands. The rest keep following.
+        private static PlayerBot PromoteLeader(BotParty party)
+        {
+            PlayerBot heir = null;
+            foreach (var m in party.Members)
+            {
+                if (m != null && !m.Deleted && m.Alive)
+                {
+                    heir = m;
+                    break;
+                }
+            }
+            if (heir == null)
+            {
+                return null;
+            }
+
+            var fallen = party.Leader;
+            party.Members.Remove(heir);
+            if (fallen != null && !fallen.Deleted && !fallen.Alive)
+            {
+                party.Members.Add(fallen); // still carried for a res
+            }
+            party.Leader = heir;
+
+            if (DungeonRegistry.IsInDungeon(heir))
+            {
+                heir.Behavior = new DungeonCrawlerBehavior();
+                if (party.State != BotPartyState.Crawling)
+                {
+                    party.SetState(BotPartyState.Crawling);
+                }
+            }
+            else
+            {
+                heir.Behavior = new TravelerBehavior { DestinationName = party.Target?.Name };
+                party.SetState(BotPartyState.Marching);
+            }
+
+            var line = ChatLibrary.PickRandom("party_lead_taken");
+            if (!string.IsNullOrEmpty(line))
+            {
+                heir.Say(line);
+            }
+            Console.WriteLine(
+                $"[party] {fallen?.Name ?? "the leader"} fell; {heir.Name} leads the " +
+                $"{party.Target?.Dungeon ?? party.Target?.Name} party now " +
+                $"({party.Members.Count} with them)");
+            return heir;
+        }
+
         private static void Disband(BotParty party, bool sayGoodbyes)
         {
             _parties.Remove(party);

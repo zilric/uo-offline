@@ -66,6 +66,14 @@ namespace Server.CustomBots
                     // since the last tick — answer before acting.
                     BotPlayerParty.CheckInvite(bot);
                     bot.Behavior?.Tick(bot);
+
+                    // Judged from OUTSIDE the brain, after it has had its
+                    // say: is this bot actually getting closer to wherever
+                    // it claims to be going? Every other stuck detector
+                    // belongs to one behavior and counts its own attempts,
+                    // so a bot that keeps retrying resets them all and jams
+                    // in silence. See BotNavWatch.
+                    BotNavWatch.Observe(bot);
                 }
                 catch (Exception ex)
                 {

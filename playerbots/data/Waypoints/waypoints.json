@@ -31534,9 +31534,9 @@
     },
     {
       "Name": "Wrong L2 WP 1",
-      "X": 5689,
-      "Y": 568,
-      "Z": 0,
+      "X": 5691,
+      "Y": 571,
+      "Z": 25,
       "Connects": [
         "Wrong L2 WP 11",
         "Wrong L2 WP 6",
@@ -31544,19 +31544,10 @@
       ]
     },
     {
-      "Name": "Wrong L2 WP 2",
-      "X": 5673,
-      "Y": 521,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 12"
-      ]
-    },
-    {
       "Name": "Wrong L2 WP 3",
-      "X": 5733,
+      "X": 5728,
       "Y": 571,
-      "Z": 0,
+      "Z": 20,
       "Connects": [
         "Wrong L2 Door WP",
         "Wrong L2 WP 6"
@@ -31564,20 +31555,11 @@
     },
     {
       "Name": "Wrong L2 WP 4",
-      "X": 5649,
-      "Y": 573,
-      "Z": 0,
+      "X": 5653,
+      "Y": 571,
+      "Z": 20,
       "Connects": [
         "Wrong L2 WP 8"
-      ]
-    },
-    {
-      "Name": "Wrong L2 WP 5",
-      "X": 5709,
-      "Y": 527,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 16"
       ]
     },
     {
@@ -31592,93 +31574,49 @@
     },
     {
       "Name": "Wrong L2 WP 8",
-      "X": 5669,
-      "Y": 569,
-      "Z": 0,
+      "X": 5667,
+      "Y": 571,
+      "Z": 20,
       "Connects": [
         "Wrong L2 WP 1",
         "Wrong L2 WP 4"
       ]
     },
     {
-      "Name": "Wrong L2 WP 10",
-      "X": 5701,
-      "Y": 541,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 18"
-      ]
-    },
-    {
       "Name": "Wrong L2 WP 11",
-      "X": 5689,
-      "Y": 542,
+      "X": 5691,
+      "Y": 539,
       "Z": 0,
       "Connects": [
-        "Wrong L2 WP 1",
-        "Wrong L2 WP 12",
-        "Wrong L2 WP 14"
-      ]
-    },
-    {
-      "Name": "Wrong L2 WP 12",
-      "X": 5674,
-      "Y": 526,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 11",
-        "Wrong L2 WP 2"
+        "Wrong L2 WP 1"
       ]
     },
     {
       "Name": "Wrong L2 WP 14",
-      "X": 5705,
-      "Y": 528,
+      "X": 5699,
+      "Y": 531,
       "Z": 0,
       "Connects": [
-        "Wrong L2 WP 11",
-        "Wrong L2 WP 15",
         "Wrong L2 WP 18"
-      ]
-    },
-    {
-      "Name": "Wrong L2 WP 15",
-      "X": 5705,
-      "Y": 527,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 14",
-        "Wrong L2 WP 16"
-      ]
-    },
-    {
-      "Name": "Wrong L2 WP 16",
-      "X": 5707,
-      "Y": 525,
-      "Z": 0,
-      "Connects": [
-        "Wrong L2 WP 15",
-        "Wrong L2 WP 5"
       ]
     },
     {
       "Name": "Wrong L2 WP 18",
-      "X": 5697,
-      "Y": 535,
+      "X": 5699,
+      "Y": 539,
       "Z": 0,
       "Connects": [
-        "Wrong L2 WP 10",
         "Wrong L2 WP 14",
-        "Wrong L2 WP 19"
+        "Wrong L2 WP 11"
       ]
     },
     {
       "Name": "Wrong L2 WP 19",
-      "X": 5693,
-      "Y": 528,
+      "X": 5691,
+      "Y": 527,
       "Z": 0,
       "Connects": [
-        "Wrong L2 WP 18"
+        "Wrong L2 WP 11"
       ]
     },
     {
@@ -33696,18 +33634,18 @@
     },
     {
       "Name": "Wrong L2 WP 1 C",
-      "X": 5732,
-      "Y": 554,
-      "Z": 0,
+      "X": 5728,
+      "Y": 556,
+      "Z": 20,
       "Connects": [
         "Wrong L2 WP 3 C"
       ]
     },
     {
       "Name": "Wrong L2 WP 2 C",
-      "X": 5715,
-      "Y": 555,
-      "Z": 0,
+      "X": 5726,
+      "Y": 562,
+      "Z": 20,
       "Connects": [
         "Wrong L2 Door WP",
         "Wrong L2 WP 3 C"
@@ -33715,9 +33653,9 @@
     },
     {
       "Name": "Wrong L2 WP 3 C",
-      "X": 5726,
-      "Y": 555,
-      "Z": 0,
+      "X": 5724,
+      "Y": 556,
+      "Z": 20,
       "Connects": [
         "Wrong L2 WP 1 C",
         "Wrong L2 WP 2 C"
@@ -34918,137 +34856,12 @@
       ]
     },
     {
-      "Name": "Wrong L1 WP 1",
-      "X": 5792,
-      "Y": 526,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 49"
-      ]
-    },
-    {
       "Name": "Wrong L1 WP 3",
       "X": 5824,
       "Y": 630,
       "Z": 0,
       "Connects": [
         "Wrong L1 WP 21"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 4",
-      "X": 5828,
-      "Y": 592,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 37"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 6",
-      "X": 5869,
-      "Y": 529,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 59",
-        "Wrong L1 WP 82"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 7",
-      "X": 5782,
-      "Y": 572,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 66"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 8",
-      "X": 5872,
-      "Y": 600,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 16",
-        "Wrong L1 WP 20"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 9",
-      "X": 5831,
-      "Y": 539,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 71",
-        "Wrong L1 WP 74"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 10",
-      "X": 5872,
-      "Y": 564,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 20",
-        "Wrong L1 WP 50"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 12",
-      "X": 5808,
-      "Y": 566,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 19",
-        "Wrong L1 WP 42"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 13",
-      "X": 5845,
-      "Y": 565,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 72"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 14",
-      "X": 5783,
-      "Y": 549,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 45"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 16",
-      "X": 5850,
-      "Y": 600,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 28",
-        "Wrong L1 WP 8"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 19",
-      "X": 5808,
-      "Y": 590,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 12",
-        "Wrong L1 WP 41"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 20",
-      "X": 5872,
-      "Y": 582,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 10",
-        "Wrong L1 WP 8"
       ]
     },
     {
@@ -35062,75 +34875,34 @@
       ]
     },
     {
-      "Name": "Wrong L1 WP 24",
-      "X": 5813,
-      "Y": 527,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 77"
-      ]
-    },
-    {
       "Name": "Wrong L1 WP 25",
-      "X": 5823,
-      "Y": 555,
+      "X": 5826,
+      "Y": 553,
       "Z": 0,
       "Connects": [
-        "Wrong L1 WP 69"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 26",
-      "X": 5822,
-      "Y": 578,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 38"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 27",
-      "X": 5782,
-      "Y": 586,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 66"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 28",
-      "X": 5847,
-      "Y": 598,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 16",
-        "Wrong L1 WP 29"
+        "Wrong L1 WP 71",
+        "Wrong L1 WP 68"
       ]
     },
     {
       "Name": "Wrong L1 WP 29",
-      "X": 5847,
-      "Y": 583,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 28",
-        "Wrong L1 WP 31"
-      ]
+      "X": 5853,
+      "Y": 580,
+      "Z": 15,
+      "Connects": []
     },
     {
       "Name": "Wrong L1 WP 31",
-      "X": 5840,
-      "Y": 581,
+      "X": 5839,
+      "Y": 579,
       "Z": 0,
       "Connects": [
-        "Wrong L1 WP 29",
-        "Wrong L1 WP 33",
-        "Wrong L1 WP 72"
+        "Wrong L1 WP 33"
       ]
     },
     {
       "Name": "Wrong L1 WP 33",
-      "X": 5833,
+      "X": 5836,
       "Y": 587,
       "Z": 0,
       "Connects": [
@@ -35140,19 +34912,18 @@
     },
     {
       "Name": "Wrong L1 WP 34",
-      "X": 5834,
-      "Y": 591,
+      "X": 5836,
+      "Y": 594,
       "Z": 0,
       "Connects": [
         "Wrong L1 WP 33",
-        "Wrong L1 WP 35",
-        "Wrong L1 WP 37"
+        "Wrong L1 WP 35"
       ]
     },
     {
       "Name": "Wrong L1 WP 35",
-      "X": 5825,
-      "Y": 599,
+      "X": 5824,
+      "Y": 595,
       "Z": 0,
       "Connects": [
         "Wrong L1 WP 21",
@@ -35161,407 +34932,37 @@
       ]
     },
     {
-      "Name": "Wrong L1 WP 37",
-      "X": 5831,
-      "Y": 593,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 34",
-        "Wrong L1 WP 4"
-      ]
-    },
-    {
       "Name": "Wrong L1 WP 38",
-      "X": 5816,
-      "Y": 584,
+      "X": 5818,
+      "Y": 581,
       "Z": 0,
       "Connects": [
-        "Wrong L1 WP 26",
         "Wrong L1 WP 35",
         "Wrong L1 WP 40"
       ]
     },
     {
       "Name": "Wrong L1 WP 40",
-      "X": 5809,
-      "Y": 581,
-      "Z": 0,
+      "X": 5803,
+      "Y": 579,
+      "Z": 10,
       "Connects": [
-        "Wrong L1 WP 38",
-        "Wrong L1 WP 41"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 41",
-      "X": 5807,
-      "Y": 585,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 19",
-        "Wrong L1 WP 40",
-        "Wrong L1 WP 60"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 42",
-      "X": 5807,
-      "Y": 561,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 12",
-        "Wrong L1 WP 43",
-        "Wrong L1 WP 67"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 43",
-      "X": 5807,
-      "Y": 555,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 42",
-        "Wrong L1 WP 44"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 44",
-      "X": 5786,
-      "Y": 543,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 43"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 45",
-      "X": 5785,
-      "Y": 544,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 14",
-        "Wrong L1 WP 46"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 46",
-      "X": 5782,
-      "Y": 538,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 45",
-        "Wrong L1 WP 47"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 47",
-      "X": 5787,
-      "Y": 533,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 46",
-        "Wrong L1 WP 49"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 49",
-      "X": 5791,
-      "Y": 530,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 1",
-        "Wrong L1 WP 47"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 50",
-      "X": 5872,
-      "Y": 561,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 10",
-        "Wrong L1 WP 51"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 51",
-      "X": 5876,
-      "Y": 559,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 50",
-        "Wrong L1 WP 54"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 54",
-      "X": 5880,
-      "Y": 554,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 51",
-        "Wrong L1 WP 55"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 55",
-      "X": 5879,
-      "Y": 551,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 54",
-        "Wrong L1 WP 56"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 56",
-      "X": 5875,
-      "Y": 549,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 55",
-        "Wrong L1 WP 58"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 58",
-      "X": 5871,
-      "Y": 548,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 56",
-        "Wrong L1 WP 59"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 59",
-      "X": 5871,
-      "Y": 536,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 58",
-        "Wrong L1 WP 6"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 60",
-      "X": 5808,
-      "Y": 596,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 41",
-        "Wrong L1 WP 61"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 61",
-      "X": 5806,
-      "Y": 599,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 60",
-        "Wrong L1 WP 62"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 62",
-      "X": 5800,
-      "Y": 600,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 61",
-        "Wrong L1 WP 63"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 63",
-      "X": 5790,
-      "Y": 600,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 62",
-        "Wrong L1 WP 64"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 64",
-      "X": 5785,
-      "Y": 599,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 63",
-        "Wrong L1 WP 65"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 65",
-      "X": 5782,
-      "Y": 593,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 64",
-        "Wrong L1 WP 66"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 66",
-      "X": 5783,
-      "Y": 580,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 27",
-        "Wrong L1 WP 65",
-        "Wrong L1 WP 7"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 67",
-      "X": 5808,
-      "Y": 556,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 42",
-        "Wrong L1 WP 68"
+        "Wrong L1 WP 38"
       ]
     },
     {
       "Name": "Wrong L1 WP 68",
-      "X": 5815,
-      "Y": 552,
+      "X": 5814,
+      "Y": 554,
       "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 67",
-        "Wrong L1 WP 69",
-        "Wrong L1 WP 80"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 69",
-      "X": 5822,
-      "Y": 552,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 25",
-        "Wrong L1 WP 68",
-        "Wrong L1 WP 71"
-      ]
+      "Connects": []
     },
     {
       "Name": "Wrong L1 WP 71",
       "X": 5826,
       "Y": 542,
       "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 69",
-        "Wrong L1 WP 9"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 72",
-      "X": 5847,
-      "Y": 576,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 13",
-        "Wrong L1 WP 31"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 74",
-      "X": 5822,
-      "Y": 543,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 75",
-        "Wrong L1 WP 9"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 75",
-      "X": 5819,
-      "Y": 543,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 74",
-        "Wrong L1 WP 76"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 76",
-      "X": 5813,
-      "Y": 535,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 75",
-        "Wrong L1 WP 77"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 77",
-      "X": 5815,
-      "Y": 524,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 24",
-        "Wrong L1 WP 76",
-        "Wrong L1 WP 78"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 78",
-      "X": 5822,
-      "Y": 517,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 77",
-        "Wrong L1 WP 79"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 79",
-      "X": 5828,
-      "Y": 518,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 78"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 80",
-      "X": 5809,
-      "Y": 552,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 68",
-        "Wrong L1 WP 81"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 81",
-      "X": 5807,
-      "Y": 548,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 80"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 82",
-      "X": 5858,
-      "Y": 534,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 6",
-        "Wrong L1 WP 84"
-      ]
-    },
-    {
-      "Name": "Wrong L1 WP 84",
-      "X": 5852,
-      "Y": 541,
-      "Z": 0,
-      "Connects": [
-        "Wrong L1 WP 82"
-      ]
+      "Connects": []
     },
     {
       "Name": "Ice L2 WP 3 B",
@@ -36824,24 +36225,6 @@
       ]
     },
     {
-      "Name": "Hythloth L1 WP 1",
-      "X": 5905,
-      "Y": 17,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L1 WP 3"
-      ]
-    },
-    {
-      "Name": "Hythloth L1 WP 3",
-      "X": 5904,
-      "Y": 20,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L1 WP 1"
-      ]
-    },
-    {
       "Name": "Hythloth L2 WP 1",
       "X": 5917,
       "Y": 167,
@@ -37233,54 +36616,6 @@
       ]
     },
     {
-      "Name": "Hythloth L8 WP 1",
-      "X": 5904,
-      "Y": 99,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L8 WP 3"
-      ]
-    },
-    {
-      "Name": "Hythloth L8 WP 2",
-      "X": 5918,
-      "Y": 106,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L8 WP 6"
-      ]
-    },
-    {
-      "Name": "Hythloth L8 WP 3",
-      "X": 5906,
-      "Y": 108,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L8 WP 1",
-        "Hythloth L8 WP 5"
-      ]
-    },
-    {
-      "Name": "Hythloth L8 WP 5",
-      "X": 5911,
-      "Y": 102,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L8 WP 3",
-        "Hythloth L8 WP 6"
-      ]
-    },
-    {
-      "Name": "Hythloth L8 WP 6",
-      "X": 5915,
-      "Y": 109,
-      "Z": 0,
-      "Connects": [
-        "Hythloth L8 WP 2",
-        "Hythloth L8 WP 5"
-      ]
-    },
-    {
       "Name": "Fire L1 Door WP",
       "X": 5833,
       "Y": 1486,
@@ -37292,9 +36627,9 @@
     },
     {
       "Name": "Wrong L2 Door WP",
-      "X": 5723,
+      "X": 5728,
       "Y": 568,
-      "Z": 0,
+      "Z": 20,
       "Connects": [
         "Wrong L2 WP 2 C",
         "Wrong L2 WP 3"
@@ -39997,8 +39332,8 @@
     },
     {
       "Name": "WP 1369",
-      "X": 2557,
-      "Y": 501,
+      "X": 2558,
+      "Y": 502,
       "Z": 0,
       "Connects": [
         "WP 1224",
@@ -40790,6 +40125,53 @@
       "Connects": [
         "WP 1070",
         "WP 1134"
+      ]
+    },
+    {
+      "Name": "WP 1416",
+      "X": 5856,
+      "Y": 554,
+      "Z": 15,
+      "Connects": [
+        "Wrong L1 WP 29"
+      ]
+    },
+    {
+      "Name": "WP 1417",
+      "X": 5803,
+      "Y": 553,
+      "Z": 10,
+      "Connects": [
+        "Wrong L1 WP 68",
+        "Wrong L1 WP 40"
+      ]
+    },
+    {
+      "Name": "WP 1418",
+      "X": 5683,
+      "Y": 536,
+      "Z": 0,
+      "Connects": [
+        "Wrong L2 WP 11"
+      ]
+    },
+    {
+      "Name": "WP 1419",
+      "X": 5683,
+      "Y": 530,
+      "Z": 0,
+      "Connects": [
+        "WP 1418"
+      ]
+    },
+    {
+      "Name": "WP 1420",
+      "X": 5846,
+      "Y": 580,
+      "Z": 5,
+      "Connects": [
+        "Wrong L1 WP 29",
+        "Wrong L1 WP 31"
       ]
     }
   ]

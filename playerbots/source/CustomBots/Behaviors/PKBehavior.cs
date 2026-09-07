@@ -1,4 +1,4 @@
-// =========================================================================
+﻿// =========================================================================
 // PKBehavior.cs — the player-killer bot.
 //
 // A predatory bot that patrols the roads hunting players and other bots,
@@ -79,12 +79,26 @@ namespace Server.CustomBots
 
         private Mobile _victim;        // current hunt/loot target
         private Corpse _lootCorpse;    // corpse being looted
+        // Where the body actually fell. NOT the victim's Location — a
+        // killed bot becomes a ghost and starts drifting immediately, so
+        // looking "near the victim" was looking near a ghost walking away
+        // from its own corpse.
+        private Point3D _killSpot;
+        // A corpse we cannot reach (fell off a ledge, blocked by a door)
+        // must not hold the whole brain in the Loot phase forever.
+        private DateTime _lootUntil = DateTime.MinValue;
+        private static readonly TimeSpan LootWalkLimit = TimeSpan.FromSeconds(25);
         private DateTime _nextScan = DateTime.MinValue;
         private DateTime _fleeUntil = DateTime.MinValue;
         private DateTime _nextTauntAt = DateTime.MinValue;
 
         // ---- Combat kit (Red Mage casting, dexxer self-care) ----
         private DateTime _nextCastAt = DateTime.MinValue;
+
+        // A cast we launched is still owed a target cursor. If it turns up
+        // gone with no cursor, it was disturbed, and the red has to pay a
+        // cooldown for it — see TryCombatMagic.
+        private bool _castPending;
         private DateTime _nextCareAt = DateTime.MinValue;
 
         // ---- Dungeon-mouth ambush ----
@@ -163,11 +177,13 @@ namespace Server.CustomBots
             _patrol = new TravelerBehavior { AvoidTowns = true, Subordinate = true };
             _patrol.OnAttached(bot);
             _phase = Phase.Patrol;
+            _castPending = false;
         }
 
         public override void OnDetached(PlayerBot bot)
         {
             _patrol?.OnDetached(bot);
+            _castPending = false;
             base.OnDetached(bot);
         }
 
@@ -721,39 +737,8 @@ namespace Server.CustomBots
             }
         }
 
-        // Probe the 8 compass directions; return the first whose tile a
-        // few steps out is NOT in a guarded region.
-        private static Direction? FindUnguardedDirection(PlayerBot bot)
-        {
-            Direction[] dirs =
-            {
-                Direction.North, Direction.East, Direction.South, Direction.West,
-                Direction.Right, Direction.Down, Direction.Left, Direction.Up,
-            };
-            const int probe = 6;
-            foreach (var d in dirs)
-            {
-                int nx = bot.X, ny = bot.Y;
-                switch (d)
-                {
-                    case Direction.North: ny -= probe; break;
-                    case Direction.South: ny += probe; break;
-                    case Direction.East:  nx += probe; break;
-                    case Direction.West:  nx -= probe; break;
-                    case Direction.Right: nx += probe; ny -= probe; break;
-                    case Direction.Left:  nx -= probe; ny += probe; break;
-                    case Direction.Up:    nx -= probe; ny -= probe; break;
-                    case Direction.Down:  nx += probe; ny += probe; break;
-                }
-                var region = Region.Find(new Point3D(nx, ny, bot.Z), bot.Map);
-                if (region == null ||
-                    !region.IsPartOf<Server.Regions.GuardedRegion>())
-                {
-                    return d;
-                }
-            }
-            return null;
-        }
+        private static Direction? FindUnguardedDirection(PlayerBot bot) =>
+            RedTerritory.FindUnguardedDirection(bot);
 
         // ---- HUNT --------------------------------------------------------
         private void BeginHunt(PlayerBot bot, Mobile victim)
@@ -838,6 +823,38 @@ namespace Server.CustomBots
                 return;
             }
 
+            // A Red Mage holds a band for the same reason a blue one does.
+            // Toe to toe, every spell above first circle is disturbed by the
+            // next blow, so a mage that closes to swinging range spends the
+            // whole fight throwing Magic Arrows — the weakest thing it owns.
+            // Backing off two tiles is what makes the rest of the book
+            // castable. A tank mage (real weapon skill) still stands in and
+            // trades, which is its own T2A rhythm.
+            double pkMagery = bot.Skills[SkillName.Magery].Base;
+            double pkWeapon = Math.Max(
+                bot.Skills[SkillName.Swords].Base,
+                Math.Max(bot.Skills[SkillName.Fencing].Base,
+                    Math.Max(bot.Skills[SkillName.Macing].Base,
+                             bot.Skills[SkillName.Wrestling].Base)));
+
+            if (pkMagery >= 65.0 && pkWeapon < 70.0)
+            {
+                int mdist = (int)bot.GetDistanceToSqrt(victim.Location);
+                if (mdist < 4)
+                {
+                    var back = Opposite(bot.GetDirectionTo(victim));
+                    bot.Move(back);
+                    bot.Move(back); // same-speed foe: one step only shuffles
+                }
+                else if (mdist > 8)
+                {
+                    var din = bot.GetDirectionTo(victim);
+                    if (bot.Direction != din) bot.Direction = din;
+                    bot.Move(din);
+                }
+                return;
+            }
+
             if (!bot.InRange(victim.Location, 1))
             {
                 var d = bot.GetDirectionTo(victim);
@@ -889,11 +906,41 @@ namespace Server.CustomBots
             if (bot.Target != null)
             {
                 try { bot.Target.Invoke(bot, victim); } catch { }
+                _castPending = false;
                 _nextCastAt = Core.Now +
                     TimeSpan.FromSeconds(2.5 + Utility.RandomDouble() * 2.0);
                 return;
             }
-            if (bot.Spell != null || Core.Now < _nextCastAt)
+            if (bot.Spell != null)
+            {
+                return; // still chanting — the cursor comes next tick
+            }
+
+            // Launched a cast, and now there is no spell AND no cursor:
+            // it was DISTURBED. Pre-AOS any damage taken mid-cast kills
+            // the spell outright and shows nothing for it (the hurt-fizzle
+            // effect is AOS-only), so all the onlooker sees is the words
+            // of power and then nothing.
+            //
+            // The cooldown used to be stamped ONLY when a cursor was
+            // delivered, so a disturbed red re-cast on the very next tick,
+            // and the next, for the whole fight: an endless stream of
+            // mantras, not one spell, and the weapon left in the pack the
+            // entire time (casting pockets it and the re-arm never ran).
+            // A disturbed cast now costs the same beat a landed one does.
+            if (_castPending)
+            {
+                _castPending = false;
+                _nextCastAt = Core.Now + TimeSpan.FromSeconds(1.5);
+                if (AdventurerBehavior.CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[pk] {bot.Name} cast DISTURBED by '{victim.Name}'");
+                }
+                return;
+            }
+
+            if (Core.Now < _nextCastAt)
             {
                 return;
             }
@@ -902,7 +949,30 @@ namespace Server.CustomBots
                 return;
             }
 
+            // Inside swing range nothing above first circle survives the
+            // trade — the next blow disturbs it. Spell.Disturb spares a
+            // FIRST circle spell on a hurt disturb when Core.AOS is false,
+            // so Magic Arrow is what actually lands while toe to toe. A
+            // held victim isn't swinging, so it doesn't force the drop.
+            bool inSwingRange = bot.InRange(victim.Location, 2) &&
+                                !victim.Paralyzed && !victim.Frozen;
+
             string spell;
+            if (inSwingRange)
+            {
+                // Toe to toe, nothing above first circle survives the next
+                // blow — and a first circle is not worth casting. Casting
+                // pockets the weapon (pre-AOS ClearHands), so a point-blank
+                // Magic Arrow trades a real swing for about five damage,
+                // then the re-arm costs another beat. It was a third of
+                // every spell a red threw.
+                //
+                // So it says nothing here. The positioning below backs a
+                // mage out to its band, where the whole book is live, and a
+                // dexxer would rather be swinging anyway.
+                return;
+            }
+
             if (magery >= 65.0 && bot.Mana >= 14 && !victim.Paralyzed &&
                 Utility.RandomDouble() < 0.30)
             {
@@ -932,6 +1002,14 @@ namespace Server.CustomBots
             {
                 return;
             }
+            if (AdventurerBehavior.CombatDebug)
+            {
+                int dot = spell.LastIndexOf('.');
+                Console.WriteLine(
+                    $"[pk] {bot.Name} casting {spell.Substring(dot + 1)} at " +
+                    $"'{victim.Name}' [d={(int)bot.GetDistanceToSqrt(victim.Location)}]");
+            }
+
             var face = bot.GetDirectionTo(victim);
             if (bot.Direction != face) bot.Direction = face;
             try
@@ -945,7 +1023,10 @@ namespace Server.CustomBots
             {
                 return;
             }
-            // Cooldown is stamped when the cursor is delivered.
+            // The cast is away. The cooldown is stamped when the cursor is
+            // delivered — or when the disturb check above notices the cast
+            // died on the way there.
+            _castPending = true;
         }
 
         // Casting pocketed the weapon (pre-AOS ClearHands) — put it back
@@ -980,6 +1061,7 @@ namespace Server.CustomBots
         private void EndHunt(PlayerBot bot)
         {
             _victim = null;
+            _castPending = false;
             bot.Combatant = null;
             _phase = Phase.Patrol;
         }
@@ -1016,18 +1098,61 @@ namespace Server.CustomBots
         }
 
         // ---- LOOT --------------------------------------------------------
+        //
+        // The half of murder the reds were not doing. They killed, they
+        // stood over the body, and they walked away with the gold and
+        // nothing else — while the gossip lines had been saying "dry
+        // looted too" since the day they were written.
+
+        // Called from PlayerBot.OnDeath on the KILLER's brain, the moment
+        // the corpse exists.
+        //
+        // The loot phase used to be reachable only out of TickHunt, which
+        // meant it only ever fired for a kill the red had gone looking
+        // for. Half of a PK's bodies come from the other direction — a
+        // blue swings first, and TickPatrol fights it where it stands
+        // without ever entering Hunt. Those kills were never looted at
+        // all. Hooking the death itself catches every one: hunted,
+        // ambushed, jumped, or finished off for a gang-mate.
+        public void OnKill(PlayerBot bot, Mobile victim)
+        {
+            if (bot == null || bot.Deleted || !bot.Alive || victim == null)
+            {
+                return;
+            }
+
+            // Running for your life beats going through pockets.
+            if (_phase == Phase.Flee)
+            {
+                Console.WriteLine(
+                    $"[pk] {bot.Name} killed {victim.Name} mid-flight — no time to loot");
+                return;
+            }
+
+            BeginLoot(bot, victim);
+        }
+
         private void BeginLoot(PlayerBot bot, Mobile deadVictim)
         {
             _phase = Phase.Loot;
             bot.Combatant = null;
             _victim = null;
+            _killSpot = deadVictim.Location;
+            _lootUntil = Core.Now + LootWalkLimit;
             _lootCorpse = FindCorpse(bot, deadVictim);
 
             if (_lootCorpse == null)
             {
                 // No corpse found — nothing to loot, resume patrol.
+                Console.WriteLine(
+                    $"[pk] {bot.Name} killed {deadVictim.Name} but found no body " +
+                    $"at ({_killSpot.X},{_killSpot.Y})");
                 _phase = Phase.Patrol;
+                return;
             }
+
+            Console.WriteLine(
+                $"[pk] {bot.Name} killed {deadVictim.Name} — going through the body");
         }
 
         private void TickLoot(PlayerBot bot)
@@ -1040,17 +1165,33 @@ namespace Server.CustomBots
                 return;
             }
 
-            // Walk to the corpse.
-            if (!bot.InRange(corpse.Location, 1))
+            var loc = corpse.GetWorldLocation();
+
+            // Walk to the corpse. Two steps a tick — the decision tick is
+            // two seconds wide and a mage PK kills from range, so one step
+            // a tick left it ambling toward the body long enough for the
+            // corpse to be picked over by somebody else.
+            if (!bot.InRange(loc, 1))
             {
-                var d = bot.GetDirectionTo(corpse);
+                if (Core.Now > _lootUntil)
+                {
+                    Console.WriteLine(
+                        $"[pk] {bot.Name} could not reach {corpse.Owner?.Name ?? "the"}" +
+                        $" corpse at ({loc.X},{loc.Y}) — leaving it");
+                    _lootCorpse = null;
+                    _phase = Phase.Patrol;
+                    return;
+                }
+
+                var d = bot.GetDirectionTo(loc);
                 if (bot.Direction != d) bot.Direction = d;
+                bot.Move(d);
                 bot.Move(d);
                 return;
             }
 
-            // On the corpse — grab the gold and go.
-            GrabGold(bot, corpse);
+            // Standing on the body. Take what a killer takes.
+            StripCorpse(bot, corpse);
             _lootCorpse = null;
             _phase = Phase.Patrol;
         }
@@ -1214,38 +1355,168 @@ namespace Server.CustomBots
             }
         }
 
-        private static bool IsGuarded(Mobile m)
-        {
-            return m.Region != null &&
-                   m.Region.IsPartOf<Server.Regions.GuardedRegion>();
-        }
+        // Whether the watch actually turns out here — not merely whether a
+        // GuardedRegion exists, which Buccaneer's Den also is. One answer,
+        // shared with the Traveler's own bailout.
+        private static bool IsGuarded(Mobile m) => RedTerritory.IsUnderGuards(m);
 
-        private static Corpse FindCorpse(PlayerBot bot, Mobile deadVictim)
+        // The body is where the KILLER is standing, not where the victim
+        // is. A killed bot rises as a ghost and drifts off at once, so
+        // searching around the victim found an empty patch of ground more
+        // often than it found the corpse. Search around the red, and fall
+        // back to the remembered kill spot for a ranged kill.
+        private Corpse FindCorpse(PlayerBot bot, Mobile deadVictim)
         {
-            // The victim's corpse should be at or near where they died.
-            foreach (var item in bot.Map.GetItemsInRange(
-                         deadVictim.Location, 2))
+            foreach (var item in bot.Map.GetItemsInRange(bot.Location, 6))
             {
-                if (item is Corpse c && c.Owner == deadVictim)
+                if (item is Corpse c && !c.Deleted && c.Owner == deadVictim)
+                {
                     return c;
+                }
             }
+
+            foreach (var item in bot.Map.GetItemsInRange(_killSpot, 4))
+            {
+                if (item is Corpse c && !c.Deleted && c.Owner == deadVictim)
+                {
+                    return c;
+                }
+            }
+
             return null;
         }
 
-        private static void GrabGold(PlayerBot bot, Corpse corpse)
+        // How often a kill gets stripped to the bone rather than picked
+        // over. Both happened; "dry looted" was the one people remembered,
+        // and it is the one the victim's own flow already has an answer
+        // for (BotDeathManager.GiveUpCorpse re-kits a bot that comes back
+        // to an empty body).
+        private const double DryLootChance = 0.35;
+
+        // -------------------------------------------------------------------
+        // Take what a killer takes.
+        //
+        // Always: the gold, and the light things anyone would fence —
+        // reagents, scrolls, potions, bandages, gems and jewellery. Magic
+        // weapons and armour too; those are the whole reason to be out
+        // here. On a dry loot, the plain kit goes as well and the corpse is
+        // left bare.
+        //
+        // Hair and beards are part of how a corpse looks, not loot. Pack
+        // limits are the engine's (CheckHold), so a red that has filled up
+        // simply stops taking rather than swallowing a mountain of plate.
+        // -------------------------------------------------------------------
+        private static void StripCorpse(PlayerBot bot, Corpse corpse)
         {
-            // Take gold from the corpse into the PK's pack. Keep it simple
-            // and safe — gold only; full item looting is noisy and the
-            // bots are transient anyway.
-            var loot = new List<Item>();
-            foreach (var item in corpse.Items)
+            var pack = bot.Backpack;
+            if (pack == null)
             {
-                if (item is Gold) loot.Add(item);
+                return;
             }
-            foreach (var gold in loot)
+
+            bool dryLoot = Utility.RandomDouble() < DryLootChance;
+            int gold = 0, items = 0;
+            string prize = null;
+
+            // Copy first: pack.AddItem mutates corpse.Items underneath us.
+            var onBody = new List<Item>(corpse.Items);
+
+            for (int i = 0; i < onBody.Count; i++)
             {
-                try { bot.AddToBackpack(gold); } catch { }
+                var item = onBody[i];
+
+                if (item.Layer is Layer.Hair or Layer.FacialHair || !item.Movable)
+                {
+                    continue;
+                }
+
+                bool take = dryLoot;
+                switch (item)
+                {
+                    case Gold:
+                    case BaseReagent:
+                    case SpellScroll:
+                    case BasePotion:
+                    case Bandage:
+                    case BaseJewel:
+                        take = true;
+                        break;
+
+                    case BaseWeapon w when
+                        w.DamageLevel != WeaponDamageLevel.Regular ||
+                        w.AccuracyLevel != WeaponAccuracyLevel.Regular:
+                        w.Identified = true;
+                        prize ??= DescribeWeapon(w);
+                        take = true;
+                        break;
+
+                    case BaseArmor a when
+                        a.ProtectionLevel != ArmorProtectionLevel.Regular:
+                        a.Identified = true;
+                        prize ??= $"a {a.ItemData.Name} of " +
+                                  $"{a.ProtectionLevel.ToString().ToLowerInvariant()}";
+                        take = true;
+                        break;
+
+                    default:
+                        if (Array.IndexOf(Loot.GemTypes, item.GetType()) >= 0)
+                        {
+                            take = true;
+                        }
+                        break;
+                }
+
+                if (!take || pack.CheckHold(bot, item, false, true) != true)
+                {
+                    continue;
+                }
+
+                if (item is Gold g)
+                {
+                    gold += g.Amount;
+                }
+                else
+                {
+                    items++;
+                }
+                pack.AddItem(item);
             }
+
+            if (gold == 0 && items == 0)
+            {
+                return; // the body was already bare — nothing to crow about
+            }
+
+            bot.Animate(32, 5, 1, true, false, 0); // bend over the body
+
+            var line = ChatLibrary.PickRandom(prize != null ? "pk_prize" : "pk_loot");
+            if (!string.IsNullOrEmpty(line))
+            {
+                bot.Say(line);
+            }
+
+            Console.WriteLine(
+                $"[pk] {bot.Name} looted {corpse.Owner?.Name ?? "a corpse"}" +
+                $" for {gold}gp + {items} item(s)" +
+                (dryLoot ? " (stripped bare)" : "") +
+                (prize != null ? $" — {prize}" : ""));
+        }
+
+        // "a halberd of vanquishing" — the line off the corpse that made
+        // the whole ambush worth it.
+        private static string DescribeWeapon(BaseWeapon w)
+        {
+            string name = w.ItemData.Name ?? "weapon";
+            string power = w.DamageLevel switch
+            {
+                WeaponDamageLevel.Ruin  => "ruin",
+                WeaponDamageLevel.Might => "might",
+                WeaponDamageLevel.Force => "force",
+                WeaponDamageLevel.Power => "power",
+                WeaponDamageLevel.Vanq  => "vanquishing",
+                _                       => null,
+            };
+            return power != null ? $"a {name} of {power}" : $"an accurate {name}";
         }
 
         private static Direction Opposite(Direction d)

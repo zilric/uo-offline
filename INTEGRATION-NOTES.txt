@@ -220,6 +220,35 @@ unreachable), and widening the 38-tile search window to 64 moved the path
 failure rate only 16.3% -> 14.7%, which is not worth the cost. Both were
 reverted.
 
+
+FOLLOW-UP (2026-09-03): the fix above was only half of it. It taught the
+CACHE path about PlayerBots, but a few lines further down the statics that
+MovementImpl itself reads were still gated on BaseCreature:
+
+    if (bc != null)
+    {
+        MoveImpl.AlwaysIgnoreDoors = bc.CanOpenDoors;    <-- never a bot
+        MoveImpl.IgnoreMovableImpassables = bc.CanMoveOverObstacles;
+    }
+
+A step-cache HIT is answered from the bitmap, which knew about bots. A
+cache MISS falls through to GetSuccessorsSlowPath, which runs the real
+per-direction CheckMovement -- and that reads these statics. With them
+unset, every closed door on a miss cell went back to being a solid wall.
+Dungeon interiors are exactly where the cache misses, which is why bots
+kept shuffling at dungeon doors after the September 1st fix while surface
+doors behaved. Now driven from the resolved per-mobile fields instead:
+
+    MoveImpl.AlwaysIgnoreDoors = _currentMobileIgnoreDoors;
+    MoveImpl.IgnoreMovableImpassables = _currentMobileIgnoreMovableImpassables;
+
+Known limit: AlwaysIgnoreDoors has no notion of "unlocked only", so on a
+cache-miss cell a bot can plan a route through a LOCKED door and then fail
+to open it. That is the same dead end it already had on every door, now
+confined to locked ones on miss cells, so it is strictly an improvement --
+but if locked dungeon doors ever become a hotspot in stuck_report.json,
+this is the line to revisit.
+
 If deploying playerbots onto a fresh ModernUO clone, re-apply this or bots
 cannot path into any room whose door is shut.
 

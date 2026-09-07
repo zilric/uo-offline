@@ -58,6 +58,16 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
 
 Newest first.
 
+- **Mages kite instead of plinking.** Magic Arrow was nearly half of every caster's spells, and it never won a fight. Casters back off to spell range now and open with the stronger circles, and a tank mage no longer drops its halberd to plink.
+- **Resurrection is real.** Dead bots used to stand up on their own after a while, with no healer anywhere near. A ghost now walks to an ankh or a wandering healer, or gets raised by a friendly bot with the Magery or Healing to do it. Ghosts that die underground climb out first. Reds strip the bodies they make and never raise their own victim.
+- **Parties are bigger and look after each other.** Random hunting parties were two bots and rare. They form at three to five now, scaled to how many bots are online, help any partymate against reds and monsters, and resurrect the fallen. If the leader dies, someone else takes over.
+- **Gossip fits the moment.** Nobody shouts "red in Despise" while fighting that red, or reports on the spot they are standing. Rumours fade with distance, bystanders answer the teller, a repeat killer gets called out by name, and a red sighting gets told once.
+- **Deaths have killers again.** Most bot deaths were being logged with no killer at all, which hid what was going on. With the names in, nearly all of them turned out to be PK gangs at dungeon mouths, which is how 1999 worked.
+- **See the bots' roads in-game.** `[showways` draws the waypoint graph in the world around you, coloured by whether each node can be reached, and `[hideways` clears it. Handy for seeing why a bot walks the way it does.
+- **Spells get cast in melee.** T2A cancels any spell above first circle the moment the caster is hit, and it says nothing when it does. Bots in melee chanted and nothing ever came out. At sword range they cast first circle only and step back for the rest.
+- **Bots size up the room.** Before engaging, a bot weighs every monster in the room rather than the nearest one, pulls stragglers, and runs on numbers along real waypoints. Every bot has its own nerve, so some gamble.
+- **Crawlers go deeper.** Most of the stairs and teleporters in the dungeons had no record of where they led, so crawlers stayed on the first floor. A discovery pass finds them and a tool authors the missing records. Wrong and Hythloth got their first floors re-done room by room.
+- **Dungeon doors, second half.** Bots still shuffled at closed doors inside dungeons after the September 1 door fix, because the pathfinder's fallback route had never been told about bots. It has now.
 - **Bots buy what they say they want.** A bot shouting "WTB regs" is making a real offer now. Tell it you have them and it walks over and haggles, the same as any other trade. What a bot asks for matches who it is: mages want reagents and leather, warriors want blades and bandages, everyone wants recall scrolls. They only ask for what they will actually buy, and they count their bank account when deciding what they can afford instead of just the coins in their pocket.
 - **Haggling holds.** Talk a hawker down, hear "deal", and the trade window opens at the price you agreed. It used to quietly revert to the asking price and then refuse the coin you put down, which looked like a broken accept button. A seller who is short now says so and says how much is missing.
 - **Bots get into rooms.** A closed door was a solid wall as far as bot pathing was concerned, so a bot would stand against the wall beside an open doorway swinging at a monster it could not reach. Every monster in the game could already walk through those doors. Bots do now too, and one that genuinely cannot reach something gives up in a few seconds instead of grinding at a wall for the better part of a minute.
@@ -242,11 +252,11 @@ The `admin` account is a Game Master. It's how you set the world up, but a GM is
 
 **The event journal and gossip.** The shard keeps a record of everything notable — kills, deaths, murders, duels, hunts, red sightings — and bots at banks retell real events. "Aldreth got pked at despise earlier!!" only gets said if it actually happened. Bots that hunted or dueled together become friends and greet each other by name from then on.
 
-**Hunting parties.** A fighter broadcasts "LFG despise anyone?", nearby bots answer and converge, and the group walks real roads to a dungeon, goes in together, and fights as a unit until the run ends with "gg all". Guildmates and friends get asked first. You can answer too: say "me" and the leader sends you a real party invite.
+**Hunting parties.** A fighter broadcasts "LFG despise anyone?", nearby bots answer and converge, and the group walks real roads to a dungeon, goes in together, and fights as a unit until the run ends with "gg all". Parties run three to five strong, scaled to how many bots are online, and members help each other against reds and resurrect the fallen. Guildmates and friends get asked first. You can answer too: say "me" and the leader sends you a real party invite.
 
 **Play with them.** The bots treat you like another player. Say a bot's name and it answers. Greet the bank and somebody greets back, or nobody does. Ask a question and get a shrug. Form a group through the party gump, by shouting LFG, or by asking "wanna group?" — members follow you, run to keep up, fight your fights, and beg off in character when they're busy. Beggars and lost newbies will latch on and follow you across the plaza.
 
-**Real deaths and corpse runs.** Novices misjudge fights and sometimes die, and retreat thresholds scale with experience. Then the most famous thing in UO happens: the ghost haunts its corpse moaning OoOoOo, walks to a healer or shrine, resurrects in a death robe, and runs back hoping the loot is still there. It gathers its belongings and puts its armour back on, or wails "WHO LOOTED MY CORPSE" if the corpse rotted.
+**Real deaths and corpse runs.** Novices misjudge fights and sometimes die, and retreat thresholds scale with experience. Then the most famous thing in UO happens: the ghost haunts its corpse moaning OoOoOo, walks to an ankh or a wandering healer, or gets raised by a friendly bot with the skill, and comes back in a death robe, and runs back hoping the loot is still there. It gathers its belongings and puts its armour back on, or wails "WHO LOOTED MY CORPSE" if the corpse rotted.
 
 **Criminals are fair game.** Flag gray and the fighters standing near you draw, up to three of them, and break off when the flag lapses. Tradespeople stay out of it, and the bank crowd only swings at what walks into arm's reach rather than abandoning the counter to chase you. Bots get the same treatment, so a thief who gets caught has a problem.
 
@@ -393,6 +403,8 @@ The map background PNG is generated. If it's missing, rebuild it from your UO cl
 - `[BotInfo` — target a bot and dump its class, tier, stats, skills, notoriety, behavior, and destination.
 - `[BotWhere`, `[hpacomponents`, `[hpaedges`, and the field-debug commands.
 - `[CombatDebug on|off` — verbose per-cast combat logging at runtime.
+- `[showways [radius] [nolinks]` / `[hideways` — draw the waypoint graph in the world around you, coloured by reachability.
+- `[MapPads` — find teleporters and stairs that have no destination record, for authoring with `tools/author_stairs.py`.
 
 **Living shard:**
 
@@ -434,7 +446,7 @@ The map background PNG is generated. If it's missing, rebuild it from your UO cl
 
 The island cities still need their own waypoint pockets and arrival handling. Six virtue shrines are live as walkable pilgrimage destinations (Chaos, Spirituality, Compassion, Sacrifice, Justice, Honor), each with a server-verified overland trail. Valor and Humility sit on gateless isles and get their pilgrims by Recall. Honesty's island hasn't been authored yet.
 
-**Dungeons.** Still being worked on, mainly the waypoint network the bots walk underground.
+**Dungeons.** Still being worked on, mainly the waypoint network the bots walk underground. Wrong and Hythloth are being re-authored floor by floor. Crawlers can reach the deeper levels now, but most runs still end on the first floor.
 
 </details>
 

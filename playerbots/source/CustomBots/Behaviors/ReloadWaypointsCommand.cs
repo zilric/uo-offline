@@ -22,6 +22,11 @@ namespace Server.CustomBots
         {
             int n = WaypointRegistry.Load();
             e.Mobile.SendMessage($"Reloaded waypoint graph: {n} node(s).");
+
+            // Anyone looking at the graph is now looking at a stale one.
+            // Redraw where they stand so a mark-reload-look loop needs no
+            // second command.
+            WaypointView.RefreshAll();
         }
     }
 }

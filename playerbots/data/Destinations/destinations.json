@@ -6333,39 +6333,6 @@
       "Level": 1
     },
     {
-      "Name": "Wrong lvl2 Room 1",
-      "X": 5685,
-      "Y": 568,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L2 WP 1",
-      "Dungeon": "Wrong lvl2",
-      "Level": 2
-    },
-    {
-      "Name": "Wrong lvl2 Room 2",
-      "X": 5673,
-      "Y": 521,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L2 WP 2",
-      "Dungeon": "Wrong lvl2",
-      "Level": 2
-    },
-    {
-      "Name": "Wrong lvl2 Room 3",
-      "X": 5733,
-      "Y": 571,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L2 WP 3",
-      "Dungeon": "Wrong lvl2",
-      "Level": 2
-    },
-    {
       "Name": "Fire lvl2 Room 1",
       "X": 5695,
       "Y": 1353,
@@ -6374,17 +6341,6 @@
       "City": "",
       "NearestWaypoint": "Fire L2 WP 1",
       "Dungeon": "Fire lvl2",
-      "Level": 2
-    },
-    {
-      "Name": "Wrong lvl2b Room",
-      "X": 5695,
-      "Y": 659,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L2 WP 1 B",
-      "Dungeon": "Wrong lvl2b",
       "Level": 2
     },
     {
@@ -6532,14 +6488,24 @@
     },
     {
       "Name": "Wrong lvl2 Room 1 C",
-      "X": 5728,
-      "Y": 550,
+      "X": 5723,
+      "Y": 562,
       "Z": 0,
       "Type": "DungeonRoom",
       "City": "",
       "NearestWaypoint": "Wrong L2 WP 1 C",
       "Dungeon": "Wrong lvl2",
-      "Level": 2
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5724,
+          "Y": 565,
+          "Z": 20,
+          "Waypoints": [
+            "Wrong L2 WP 2 C"
+          ]
+        }
+      ]
     },
     {
       "Name": "Fire lvl1 Room 1 C",
@@ -6594,61 +6560,6 @@
       "City": "",
       "NearestWaypoint": "Fire L1 WP 7 B",
       "Dungeon": "Fire lvl1",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1b Room",
-      "X": 5792,
-      "Y": 526,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 1",
-      "Dungeon": "Wrong lvl1b",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1 Room 2",
-      "X": 5823,
-      "Y": 626,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 3",
-      "Dungeon": "Wrong lvl1",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1 Room 3",
-      "X": 5875,
-      "Y": 549,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 56",
-      "Dungeon": "Wrong lvl1",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1 Room 4",
-      "X": 5822,
-      "Y": 578,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 26",
-      "Dungeon": "Wrong lvl1",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1 Room 5",
-      "X": 5872,
-      "Y": 600,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 8",
-      "Dungeon": "Wrong lvl1",
       "Level": 1
     },
     {
@@ -6738,17 +6649,6 @@
       "NearestWaypoint": "Shame L5 WP 5",
       "Dungeon": "Shame lvl5b",
       "Level": 5
-    },
-    {
-      "Name": "Hythloth lvl1 Room 1",
-      "X": 5904,
-      "Y": 21,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Hythloth L1 WP 1",
-      "Dungeon": "Hythloth lvl1",
-      "Level": 1
     },
     {
       "Name": "Hythloth lvl2 Room 1",
@@ -6895,8 +6795,8 @@
     },
     {
       "Name": "Hythloth lvl8 Room 1",
-      "X": 5904,
-      "Y": 99,
+      "X": 5905,
+      "Y": 108,
       "Z": 0,
       "Type": "DungeonRoom",
       "City": "",
@@ -7151,9 +7051,9 @@
           ]
         }
       ],
-      "TargetX": 5904,
+      "TargetX": 5905,
       "TargetY": 16,
-      "TargetZ": 64,
+      "TargetZ": 44,
       "TargetLevel": 1
     },
     {
@@ -8654,7 +8554,7 @@
       "ArrivalZ": 0,
       "Arrivals": [
         {
-          "X": 5698,
+          "X": 5699,
           "Y": 662,
           "Z": 0,
           "Waypoints": [
@@ -8710,8 +8610,8 @@
       "ArrivalZ": 0,
       "Arrivals": [
         {
-          "X": 5705,
-          "Y": 625,
+          "X": 5698,
+          "Y": 632,
           "Z": 0,
           "Waypoints": [
             "Wrong L2 WP 3 B"
@@ -8882,7 +8782,8 @@
           "Y": 593,
           "Z": 0,
           "Waypoints": [
-            "Wrong L1 WP 4"
+            "Wrong L1 WP 4",
+            "Wrong L1 WP 35"
           ]
         }
       ],
@@ -8945,34 +8846,6 @@
       "TargetX": 5831,
       "TargetY": 324,
       "TargetZ": 27,
-      "TargetLevel": 2
-    },
-    {
-      "Name": "Wrong lvl1 Descend to L2 B",
-      "X": 5870,
-      "Y": 530,
-      "Z": 15,
-      "Type": "DungeonDescend",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 6",
-      "Dungeon": "Wrong lvl1",
-      "Level": 1,
-      "ArrivalX": 5870,
-      "ArrivalY": 530,
-      "ArrivalZ": 15,
-      "Arrivals": [
-        {
-          "X": 5870,
-          "Y": 530,
-          "Z": 15,
-          "Waypoints": [
-            "Wrong L1 WP 6"
-          ]
-        }
-      ],
-      "TargetX": 5690,
-      "TargetY": 569,
-      "TargetZ": 25,
       "TargetLevel": 2
     },
     {
@@ -10023,17 +9896,6 @@
       "Level": 1
     },
     {
-      "Name": "Wrong lvl2b Room 21",
-      "X": 5718,
-      "Y": 624,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L2 WP 7 B",
-      "Dungeon": "Wrong lvl2b",
-      "Level": 2
-    },
-    {
       "Name": "Fire lvl2b Room 21",
       "X": 5647,
       "Y": 1430,
@@ -10053,17 +9915,6 @@
       "City": "",
       "NearestWaypoint": "Fire L1 WP 45 B",
       "Dungeon": "Fire lvl1b",
-      "Level": 1
-    },
-    {
-      "Name": "Wrong lvl1b Room 21",
-      "X": 5783,
-      "Y": 549,
-      "Z": 0,
-      "Type": "DungeonRoom",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 14",
-      "Dungeon": "Wrong lvl1b",
       "Level": 1
     },
     {
@@ -10120,17 +9971,6 @@
       "NearestWaypoint": "Hythloth L7 WP 2 B",
       "Dungeon": "Hythloth lvl7",
       "Level": 7
-    },
-    {
-      "Name": "Wrong lvl1 Descend to L2 C",
-      "X": 5867,
-      "Y": 528,
-      "Z": 15,
-      "Type": "DungeonDescend",
-      "City": "",
-      "NearestWaypoint": "Wrong L1 WP 6",
-      "Dungeon": "Wrong lvl1",
-      "Level": 1
     },
     {
       "Name": "Minoc Stables",
@@ -11182,6 +11022,369 @@
           "Z": 10,
           "Waypoints": [
             "WP 991"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Fire lvl2 Ascend to L1",
+      "X": 5701,
+      "Y": 1320,
+      "Z": 16,
+      "Type": "DungeonAscend",
+      "City": "",
+      "NearestWaypoint": "Fire L2 WP 1 B",
+      "Dungeon": "Fire lvl2",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5701,
+          "Y": 1320,
+          "Z": 16,
+          "Waypoints": [
+            "Fire L2 WP 1 B"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Hythloth lvl2 Descend to L6",
+      "X": 5919,
+      "Y": 168,
+      "Z": 22,
+      "Type": "DungeonDescend",
+      "City": "",
+      "NearestWaypoint": "Hythloth L2 WP 5",
+      "Dungeon": "Hythloth lvl2",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5919,
+          "Y": 168,
+          "Z": 22,
+          "Waypoints": [
+            "Hythloth L2 WP 5"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Hythloth lvl3 Descend to L4",
+      "X": 6039,
+      "Y": 204,
+      "Z": 22,
+      "Type": "DungeonDescend",
+      "City": "",
+      "NearestWaypoint": "Hythloth L3 WP 2",
+      "Dungeon": "Hythloth lvl3",
+      "Level": 3,
+      "Arrivals": [
+        {
+          "X": 6039,
+          "Y": 204,
+          "Z": 22,
+          "Waypoints": [
+            "Hythloth L3 WP 2"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Hythloth lvl3 Descend to L5",
+      "X": 6040,
+      "Y": 194,
+      "Z": 12,
+      "Type": "DungeonDescend",
+      "City": "",
+      "NearestWaypoint": "Hythloth L3 WP 1",
+      "Dungeon": "Hythloth lvl3",
+      "Level": 3,
+      "Arrivals": [
+        {
+          "X": 6040,
+          "Y": 194,
+          "Z": 12,
+          "Waypoints": [
+            "Hythloth L3 WP 1"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Hythloth lvl1 Descend to L2",
+      "X": 5906,
+      "Y": 97,
+      "Z": 0,
+      "Type": "DungeonDescend",
+      "City": "",
+      "NearestWaypoint": "Hythloth L8 WP 1",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Orc Cave lvl2 Ascend to L1",
+      "X": 5329,
+      "Y": 1381,
+      "Z": 10,
+      "Type": "DungeonAscend",
+      "City": "",
+      "NearestWaypoint": "Orc Cave L2 WP 1",
+      "Dungeon": "Orc Cave lvl2",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5329,
+          "Y": 1381,
+          "Z": 10,
+          "Waypoints": [
+            "Orc Cave L2 WP 1"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Orc Cave lvl2 Descend to L3",
+      "X": 5364,
+      "Y": 1289,
+      "Z": 4,
+      "Type": "DungeonDescend",
+      "City": "",
+      "NearestWaypoint": "Orc Cave L2 WP 4",
+      "Dungeon": "Orc Cave lvl2",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5364,
+          "Y": 1289,
+          "Z": 4,
+          "Waypoints": [
+            "Orc Cave L2 WP 4"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Orc Cave lvl3 Ascend to L2",
+      "X": 5272,
+      "Y": 2043,
+      "Z": 4,
+      "Type": "DungeonAscend",
+      "City": "",
+      "NearestWaypoint": "Orc Cave L3 WP 1",
+      "Dungeon": "Orc Cave lvl3",
+      "Level": 3,
+      "Arrivals": [
+        {
+          "X": 5272,
+          "Y": 2043,
+          "Z": 4,
+          "Waypoints": [
+            "Orc Cave L3 WP 1"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Hythloth lvl1 Lizard Room",
+      "X": 5921,
+      "Y": 27,
+      "Z": 44,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L1 WP 1",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Hythloth lvl1 Spider Room",
+      "X": 5913,
+      "Y": 53,
+      "Z": 22,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L1 WP 3",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Hythloth lvl1 Spider Room 2",
+      "X": 5952,
+      "Y": 27,
+      "Z": 0,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L1 WP 1",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Hythloth lvl1 Ratman Room",
+      "X": 5988,
+      "Y": 30,
+      "Z": 22,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L5 WP 1",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1
+    },
+    {
+      "Name": "Hythloth lvl1 Ratman Room 2",
+      "X": 5990,
+      "Y": 62,
+      "Z": 22,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L5 WP 1",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1
+    },
+    {
+      "Name": "Hythloth lvl1 Spider Room 3",
+      "X": 5969,
+      "Y": 80,
+      "Z": 0,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L8 WP 2",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Hythloth lvl1 Scorpion Room",
+      "X": 5942,
+      "Y": 100,
+      "Z": 22,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L8 WP 2",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Hythloth lvl1 Exit Ascend",
+      "X": 5906,
+      "Y": 16,
+      "Z": 44,
+      "Type": "DungeonAscend",
+      "City": "Moonglow",
+      "NearestWaypoint": "Shame L5 WP 80",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1
+    },
+    {
+      "Name": "Hythloth lvl1 Lizardman Room",
+      "X": 5995,
+      "Y": 106,
+      "Z": 0,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Hythloth L8 WP 2",
+      "Dungeon": "Hythloth lvl1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Wrong lvl1 Lich 1 L1 Room",
+      "X": 5859,
+      "Y": 549,
+      "Z": 15,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "WP 1416",
+      "Dungeon": "Wrong lvl1 Lich 1",
+      "Level": 1,
+      "Arrivals": []
+    },
+    {
+      "Name": "Wrong lvl1 Lich 2 L1 Room",
+      "X": 5794,
+      "Y": 545,
+      "Z": 10,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "WP 1417",
+      "Dungeon": "Wrong lvl1 Lich 2",
+      "Level": 1,
+      "Arrivals": [
+        {
+          "X": 5799,
+          "Y": 548,
+          "Z": 10,
+          "Waypoints": [
+            "WP 1417"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Wrong lvl1 Lizardmen L1 Room",
+      "X": 5826,
+      "Y": 537,
+      "Z": 0,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Wrong L1 WP 71",
+      "Dungeon": "Wrong lvl1 Lizardmen",
+      "Level": 1,
+      "Arrivals": [
+        {
+          "X": 5826,
+          "Y": 539,
+          "Z": 0,
+          "Waypoints": [
+            "Wrong L1 WP 71"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Wrong lvl2 1d L2 Room",
+      "X": 5659,
+      "Y": 571,
+      "Z": 20,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Wrong L2 WP 4",
+      "Dungeon": "Wrong lvl2 1d",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5661,
+          "Y": 574,
+          "Z": 20,
+          "Waypoints": [
+            "Wrong L2 WP 8",
+            "Wrong L2 WP 4"
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Wrong lvl2 1e L2 Room",
+      "X": 5693,
+      "Y": 531,
+      "Z": 0,
+      "Type": "DungeonRoom",
+      "City": "Moonglow",
+      "NearestWaypoint": "Wrong L2 WP 19",
+      "Dungeon": "Wrong lvl2 1e",
+      "Level": 2,
+      "Arrivals": [
+        {
+          "X": 5694,
+          "Y": 534,
+          "Z": 0,
+          "Waypoints": [
+            "Wrong L2 WP 11",
+            "Wrong L2 WP 18",
+            "WP 1418"
           ]
         }
       ]

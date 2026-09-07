@@ -1,4 +1,4 @@
-// =========================================================================
+﻿// =========================================================================
 // AdventurerBehavior.cs — Bots that explore the wilderness/dungeons,
 // engaging monsters they encounter. Uses PathFollower (A*) for real
 // pathfinding so they navigate around obstacles, into dungeons, etc.
@@ -21,6 +21,7 @@
 // =========================================================================
 
 using System;
+using System.Collections.Generic;
 using Server;
 using Server.Items;
 using Server.Mobiles;
@@ -203,6 +204,25 @@ namespace Server.CustomBots
         // The decision tick just acquires the foe and hands it here; all
         // ranged positioning + attacking happens in the StepOnce loop.
         private Mobile _rangedFoe;
+        // Why the last cast was chosen, for the [CombatDebug line. Tuning
+        // the footwork is guesswork without it: "band" and a distance means
+        // the kiting worked, "pinned" or "outpaced" means it did not.
+        private string _castReason = "?";
+
+        // When the bot first found itself inside melee while trying to hold
+        // its band. MinValue means it is not currently trying to break away.
+        private DateTime _kiteBreakSince = DateTime.MinValue;
+
+        // How long it keeps walking before it accepts that it cannot shake
+        // this foe and goes back to fighting at arm's length. Long enough
+        // for four or five steps, short enough that a mage cornered by
+        // something as fast as it is does not spend the fight running.
+        private static readonly TimeSpan KiteBreakGrace = TimeSpan.FromSeconds(2.5);
+
+        // What a tank mage will break off a swing for: sixth-circle mana,
+        // and only about half the times the cooldown is up.
+        private const int    TankMageRoomMana   = 20;
+        private const double TankMageRoomChance = 0.5;
 
         // FLEE MODE — when set, the bot is running for its life. The fast
         // loop drops everything else and sprints directly away from this
@@ -211,6 +231,11 @@ namespace Server.CustomBots
         // clear eventually stops and resumes normal behavior.
         private Mobile   _fleeFrom;
         private DateTime _fleeUntil;
+
+        // Flee mode itself. A bot can be running from a ROOM rather than
+        // from one monster (see the withdraw check on the decision tick),
+        // so the mode can't be inferred from _fleeFrom being set.
+        private bool     _fleeing;
 
         // UNREACHABLE-FOE detection. A bot can lock onto a monster it can SEE
         // but cannot physically reach — the classic case is a large rat (or
@@ -270,6 +295,10 @@ namespace Server.CustomBots
         // hostiles are still only noticed within SightRange. Kept modest so
         // bots don't aggro across half a screen.
         public int AssistRange { get; set; } = 14;
+
+        // How close another monster has to be to a foe to count as being
+        // WITH it — i.e. as something that joins in when the bot engages.
+        public int PackRadius { get; set; } = 5;
 
         // A kill only makes the event journal (and thus bank gossip) when
         // the foe was at least this beefy — an ettin or lich is news, a
@@ -421,6 +450,8 @@ namespace Server.CustomBots
                 }
             }
 
+            RollNerve(bot);
+
             // A bard heading into the field packs its lute. (Tamers get no
             // pet here — pets come out of the STABLES: the travel leg that
             // brought the tamer detours to claim it, like a real player.
@@ -434,7 +465,12 @@ namespace Server.CustomBots
             _chaseFoe = null;
             _rangedFoe = null;
             _fleeFrom = null;
+            _fleeing = false;
             _progressFoe = null;
+            _pullUntil = DateTime.MinValue;
+            _nextWithdrawAt = DateTime.MinValue;
+            _gambling = false;
+            ClearEscapeRoute();
             ClearCast();
             _nextCastAllowed = DateTime.MinValue;
             base.OnDetached(bot);
@@ -456,7 +492,7 @@ namespace Server.CustomBots
             // is busy surviving. The flee branch clears _fleeFrom and stops
             // the timer once the bot is clear, and the next tick proceeds
             // normally from there.
-            if (_fleeFrom != null)
+            if (_fleeing)
             {
                 EnsureStepTimer(bot, running: true);
                 return;
@@ -543,11 +579,6 @@ namespace Server.CustomBots
                 }
                 else
                 {
-                    // Refresh the gang-pressure count while fighting — the
-                    // fast loop's CheckRetreat reads it every ~300ms but a
-                    // 2s-stale count is fine (monsters don't teleport in).
-                    _packAttackers = CountAttackers(bot);
-
                     // Foe is alive and in range. The fast loop's CheckRetreat
                     // normally triggers the flee before we get here, but as
                     // a backstop the decision tick checks too — if HP is
@@ -573,6 +604,22 @@ namespace Server.CustomBots
 
             // -- 2. Look for an enemy --
             var target = FindNearbyEnemy(bot, out bool overwhelming);
+
+            // Hurt below the line this bot would flee at? Then it has no
+            // business starting anything. If the thing is already on it,
+            // keep running; if it isn't, decline the fight and fall
+            // through to the rest branch to bandage up first.
+            if (target != null && TooHurtToStart(bot))
+            {
+                var scene = NearThreat(bot);
+                if (scene.Attackers > 0 || TileDist(bot, target.Location) <= 3)
+                {
+                    StartFlee(bot, target);
+                    return;
+                }
+                target = null;
+            }
+
             if (target != null)
             {
                 // Way out of the bot's league AND coming for it — don't
@@ -597,6 +644,28 @@ namespace Server.CustomBots
                 }
 
                 bot.Combatant = target;
+
+                // It came with company. Melee has to close to swing, so it
+                // drags the target off its friends first rather than
+                // walking into the middle of them. Ranged bots don't need
+                // this — their standoff band below already widens when the
+                // room is crowded, which is the same idea done by kiting.
+                if (!RangedCombat && _targetKnot.Count > 1)
+                {
+                    _pullUntil = Core.Now + PullWindow;
+                    _pullFrom  = _targetKnot.Center;
+                    if (CombatDebug)
+                    {
+                        Console.WriteLine(
+                            $"[Bot {bot.Name}] pulling '{target.Name}' off " +
+                            $"{_targetKnot.Count - 1} other(s)");
+                    }
+                }
+                else
+                {
+                    _pullUntil = DateTime.MinValue;
+                }
+
                 // Route by combat style. A ranged bot (mage/archer) must
                 // NOT melee-walk to the foe's tile — hand it straight to
                 // the ranged loop so it kites/casts from the first moment.
@@ -608,6 +677,40 @@ namespace Server.CustomBots
                 {
                     SetGoal(bot, target.Location, running: true);
                 }
+                return;
+            }
+
+            // Nothing here worth picking a fight with — but the room can
+            // still be full of things that will happily pick one with US.
+            // Standing in it is how bots died without ever choosing a
+            // fight: the threat gate declined every target, and then the
+            // bot carried on patrolling through the middle of the camp.
+            //
+            // This is a LAST RESORT, not a proximity alarm. Written the
+            // obvious way (anything within sight, weight over budget) it
+            // fired constantly underground, because a dungeon always has
+            // two monsters within ten tiles: crawlers backed out of rooms
+            // nothing was even attacking them in, re-triggered eight
+            // seconds later, and never fought at all. So it wants all
+            // three of: something genuinely ON TOP of the bot, a room
+            // weighing more than DOUBLE what the bot can answer, and a
+            // cooldown, so a bot that can't get clear gets on with its
+            // life instead of shuffling in and out forever.
+            var room = NearThreat(bot);
+            if (Core.Now >= _nextWithdrawAt &&
+                room.Count >= 2 &&
+                room.NearestDist <= WithdrawRange &&
+                room.Weight > RoomBudget(bot) * 2 * _nerve)
+            {
+                _nextWithdrawAt = Core.Now + WithdrawCooldown;
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bot {bot.Name}] withdrawing — {room.Count} hostiles " +
+                        $"weighing {room.Weight} vs budget {RoomBudget(bot)}, " +
+                        $"nearest {room.NearestDist}");
+                }
+                StartFlee(bot, null);
                 return;
             }
 
@@ -826,7 +929,7 @@ namespace Server.CustomBots
         // to anything looking from outside is indistinguishable from a bot
         // standing idle and free to take a fight. BotGrayWatch has to know
         // the difference or it hands back the fight the bot just broke off.
-        public bool IsFleeing => _fleeFrom != null && Core.Now < _fleeUntil;
+        public bool IsFleeing => _fleeing && Core.Now < _fleeUntil;
 
         // Patrol legs walk by default; a follower catching up to its
         // party leader overrides this to run.
@@ -945,7 +1048,10 @@ namespace Server.CustomBots
             // it. The slot (not the foe's exact tile) fans bots out so they
             // surround the monster instead of single-filing onto one tile.
             _chaseFoe = null;
-            Point3D slot = PickAttackSlot(bot, foe);
+            var knot = Survey(bot, foe.Location, PackRadius);
+            Point3D slot = knot.Count > 1
+                ? PickAttackSlot(bot, foe, knot.Center)
+                : PickAttackSlot(bot, foe);
             SetGoal(bot, slot, running: true);
         }
 
@@ -962,6 +1068,7 @@ namespace Server.CustomBots
             _goal     = null;
             _follower = null;
             _rangedFoe = foe;
+            _kiteBreakSince = DateTime.MinValue;
             EnsureStepTimer(bot, running: true);
         }
 
@@ -988,17 +1095,24 @@ namespace Server.CustomBots
 
         // The attack spell book, weakest first:
         // (type, minMagery, mana, cooldown, pick weight).
+        // minGap is the daylight the bot wants before it will commit to a
+        // spell. Pre-AOS, one blow landed mid-chant kills the spell outright
+        // and only a FIRST circle survives it, so a sixth circle thrown at
+        // arm's length is mana poured on the floor. The longer the chant,
+        // the more room it needs — which is what makes the footwork below
+        // worth doing: back up two tiles and the whole book opens up.
         private static readonly
-            (string type, double minMagery, int mana, double cd, int weight)[] AttackSpellBook =
+            (string type, double minMagery, int mana, double cd, int weight, int minGap)[]
+            AttackSpellBook =
         {
-            ("Server.Spells.First.MagicArrowSpell",     0.0,  4, 2.0,  2),
-            ("Server.Spells.Second.HarmSpell",         25.0,  6, 2.0,  2),
-            ("Server.Spells.Third.FireballSpell",      40.0,  9, 2.25, 3),
-            ("Server.Spells.Fourth.LightningSpell",    55.0, 11, 2.5,  3),
-            ("Server.Spells.Fifth.MindBlastSpell",     70.0, 14, 2.5,  2),
-            ("Server.Spells.Sixth.EnergyBoltSpell",    85.0, 20, 3.0,  3),
-            ("Server.Spells.Sixth.ExplosionSpell",     90.0, 20, 3.0,  3),
-            ("Server.Spells.Seventh.FlameStrikeSpell", 95.0, 40, 3.5,  2),
+            ("Server.Spells.First.MagicArrowSpell",     0.0,  4, 2.0,  2, 0),
+            ("Server.Spells.Second.HarmSpell",         25.0,  6, 2.0,  2, 3),
+            ("Server.Spells.Third.FireballSpell",      40.0,  9, 2.25, 3, 4),
+            ("Server.Spells.Fourth.LightningSpell",    55.0, 11, 2.5,  3, 4),
+            ("Server.Spells.Fifth.MindBlastSpell",     70.0, 14, 2.5,  2, 5),
+            ("Server.Spells.Sixth.EnergyBoltSpell",    85.0, 20, 3.0,  3, 5),
+            ("Server.Spells.Sixth.ExplosionSpell",     90.0, 20, 3.0,  3, 5),
+            ("Server.Spells.Seventh.FlameStrikeSpell", 95.0, 40, 3.5,  2, 6),
         };
 
         // How many of the strongest castable entries stay in the pick pool.
@@ -1032,6 +1146,42 @@ namespace Server.CustomBots
             double magery = bot.Skills[SkillName.Magery].Base;
             int foeDist = TileDist(bot, foe.Location);
 
+            // INSIDE SWING RANGE: first circle only.
+            //
+            // Pre-AOS, ANY damage taken mid-cast kills the spell outright
+            // (Spell.OnCasterHurt -> Disturb(Hurt)), and the hurt-fizzle
+            // effect is AOS-only, so nothing shows for it: the mantra goes
+            // out and then nothing happens at all. Toe to toe with anything
+            // that swings, every Fireball and Energy Bolt died that way and
+            // the mage looked like it was chanting to itself.
+            //
+            // The engine leaves ONE door open. Spell.Disturb returns early
+            // for a FIRST CIRCLE spell on a hurt disturb when Core.AOS is
+            // false, so Magic Arrow lands through the blows. That is the
+            // T2A melee answer too: in a scrum you spam magic arrow, you
+            // don't feed sixth circles to the interrupt.
+            //
+            // A held foe can't swing, so it doesn't force the downgrade.
+            //
+            // This fires ONLY for a bot that has given up on getting away —
+            // pinned in a corner, or matched for speed (see the break-away
+            // in StepRangedCombat). Merely being close is no longer enough:
+            // the answer to a monster in your face is to walk out of its
+            // face, and the minGap column above keeps the big spells honest
+            // until that has happened.
+            if (pointBlank && !foe.Paralyzed && !foe.Frozen)
+            {
+                if (TryBeginFoeCast(bot, foe,
+                        "Server.Spells.First.MagicArrowSpell", 1.75, pointBlank))
+                {
+                    return;
+                }
+
+                // No mana even for that — kite while the pool refills.
+                _nextCastAllowed = Core.Now + TimeSpan.FromSeconds(2.0);
+                return;
+            }
+
             // Utility: a foe closing into the standoff band means
             // interrupted casts and point-blank trades. The classic mage
             // answer is Paralyze — freeze it, kite back out, resume the
@@ -1054,16 +1204,37 @@ namespace Server.CustomBots
                 return;
             }
 
-            // Build the eligible pool: skilled enough AND can afford it now.
+            // A foe that cannot move or swing interrupts nothing, so the
+            // gap rule is suspended against it. That is the entire point of
+            // opening with Paralyze.
+            bool held = foe.Paralyzed || foe.Frozen;
+
+            // Build the eligible pool: skilled enough, can afford it, AND
+            // standing far enough back to finish the words.
             Span<int> eligible = stackalloc int[AttackSpellBook.Length];
             int count = 0;
             for (int i = 0; i < AttackSpellBook.Length; i++)
             {
                 if (magery >= AttackSpellBook[i].minMagery &&
-                    bot.Mana >= AttackSpellBook[i].mana)
+                    bot.Mana >= AttackSpellBook[i].mana &&
+                    (held || foeDist >= AttackSpellBook[i].minGap))
                 {
                     eligible[count++] = i;
                 }
+            }
+
+            // Magic Arrow is the floor, not a choice. It survives a scrum
+            // and it is all a novice has, but once anything better is
+            // castable from here it leaves the pool — otherwise the
+            // weighted roll lands on it often enough that a Grandmaster
+            // spends half a fight plinking arrows at a daemon.
+            if (count > 1 && eligible[0] == 0)
+            {
+                for (int i = 1; i < count; i++)
+                {
+                    eligible[i - 1] = eligible[i];
+                }
+                count--;
             }
 
             if (count == 0)
@@ -1144,7 +1315,9 @@ namespace Server.CustomBots
             {
                 int dot = spellType.LastIndexOf('.');
                 var shortName = spellType.Substring(dot + 1);
-                Console.WriteLine($"[Bot {bot.Name}] casting {shortName} at '{foe.Name}'");
+                Console.WriteLine(
+                    $"[Bot {bot.Name}] casting {shortName} at '{foe.Name}' " +
+                    $"[why={_castReason} d={TileDist(bot, foe.Location)}]");
             }
 
             // Cast launched — record tracking. The fast loop takes over:
@@ -1396,7 +1569,12 @@ namespace Server.CustomBots
         //   - HP below ~65%              -> Heal         (1st circle)
         // Greater Heal needs real skill; a low-skill mage just uses Heal.
         // -------------------------------------------------------------------
-        private bool TrySelfCare(PlayerBot bot)
+        // inSwingRange: something is close enough to hit the bot while it
+        // casts. Pre-AOS that disturbs anything above first circle
+        // silently, so Cure (2nd) and Greater Heal (4th) are dead casts
+        // there — the bot reaches for the potion belt instead, and keeps
+        // only first-circle Heal, which the engine's disturb rule spares.
+        private bool TrySelfCare(PlayerBot bot, bool inSwingRange = false)
         {
             if (!SpellcasterMode) return false;
             if (Core.Now < _nextCastAllowed) return false;
@@ -1407,7 +1585,7 @@ namespace Server.CustomBots
             // no cast attempt and reaches for a cure potion instead.
             if (bot.Poisoned)
             {
-                if (bot.Mana >= 6)
+                if (bot.Mana >= 6 && !inSwingRange)
                 {
                     BeginSelfCast(bot, "Server.Spells.Second.CureSpell", 2.0);
                     if (_castInProgress) return true;
@@ -1426,7 +1604,7 @@ namespace Server.CustomBots
                 : 1.0;
             double magery = bot.Skills[SkillName.Magery].Base;
 
-            if (hpFraction < 0.40 && magery >= 65.0 && bot.Mana >= 11)
+            if (hpFraction < 0.40 && magery >= 65.0 && bot.Mana >= 11 && !inSwingRange)
             {
                 // Badly hurt and skilled enough — Greater Heal (4th, 11 mana).
                 BeginSelfCast(bot, "Server.Spells.Fourth.GreaterHealSpell", 2.5);
@@ -1644,21 +1822,28 @@ namespace Server.CustomBots
         // "InRange(loc, N)". Computed directly because Mobile has no
         // GetDistanceToSqrt method (an earlier version called that — it
         // doesn't exist, which is why range checks were wrong).
-        private static int TileDist(Mobile m, Point3D p)
+        private static int TileDist(Mobile m, Point3D p) => TileDist(m.Location, p);
+
+        private static int TileDist(Point3D a, Point3D b)
         {
-            int dx = m.X - p.X; if (dx < 0) dx = -dx;
-            int dy = m.Y - p.Y; if (dy < 0) dy = -dy;
+            int dx = a.X - b.X; if (dx < 0) dx = -dx;
+            int dy = a.Y - b.Y; if (dy < 0) dy = -dy;
             return dx > dy ? dx : dy;
         }
 
-        private static Point3D PickAttackSlot(PlayerBot bot, Mobile foe)
+        // `avoid`, when given, is the centre of the pack the foe belongs
+        // to. The slot is then chosen on the FAR side of the foe from its
+        // friends, so a melee bot walks around a group to reach its edge
+        // instead of taking the shortest line straight through the middle
+        // of it. Nearest-to-the-bot stays the tiebreak.
+        private static Point3D PickAttackSlot(PlayerBot bot, Mobile foe, Point3D? avoid = null)
         {
             // 8 tiles around the foe.
             int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
             int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
 
             Point3D best = foe.Location;
-            int bestDistSq = int.MaxValue;
+            int bestScore = int.MinValue;
             bool found = false;
 
             for (int i = 0; i < 8; i++)
@@ -1700,9 +1885,19 @@ namespace Server.CustomBots
                 int ddx = bot.X - tx;
                 int ddy = bot.Y - ty;
                 int distSq = ddx * ddx + ddy * ddy;
-                if (distSq < bestDistSq)
+
+                // Score: further from the pack is worth much more than
+                // being a step closer to walk to. Without `avoid` this is
+                // exactly the old nearest-slot rule.
+                int slotScore = -distSq;
+                if (avoid.HasValue)
                 {
-                    bestDistSq = distSq;
+                    slotScore += TileDist(new Point3D(tx, ty, tz), avoid.Value) * 64;
+                }
+
+                if (slotScore > bestScore)
+                {
+                    bestScore = slotScore;
                     best = new Point3D(tx, ty, tz);
                     found = true;
                 }
@@ -1823,13 +2018,46 @@ namespace Server.CustomBots
                     continue;
                 }
 
-                // Threat gate: don't START a fight above the dare ceiling.
-                // A foe already on us stays targetable regardless.
-                int dare   = EffectiveDare(bot, bc);
-                int danger = bc.HitsMax;
-                if (danger > dare && !attackingMe)
+                // Threat gate. A foe already on us stays targetable
+                // regardless — you don't get to decline a fight that has
+                // already started.
+                //
+                // For a FRESH fight the question is not "can I beat this
+                // orc", it is "can I beat this orc AND whatever is standing
+                // with it", because walking up to one of a group aggroes
+                // the group. So the gate weighs the whole knot around the
+                // candidate, not the candidate alone. This is the thing
+                // that used to send bots into the middle of a camp.
+                int dare = EffectiveDare(bot, bc);
+                var knot = attackingMe
+                    ? default
+                    : Survey(bot, bc.Location, PackRadius);
+
+                if (!attackingMe)
                 {
-                    continue;
+                    // Too much monster in one place — for THIS bot. A bold
+                    // one starts fights a careful one walks away from, and
+                    // sometimes that is the last decision it makes.
+                    if (knot.Weight > dare * _nerve)
+                    {
+                        continue;
+                    }
+                    // Taking on something a level-headed bot would have
+                    // walked away from. Logged so a monster death can be
+                    // traced back to the decision that caused it.
+                    if (CombatDebug && knot.Weight > dare)
+                    {
+                        Console.WriteLine(
+                            $"[Bot {bot.Name}] BOLD engage '{bc.Name}' — knot " +
+                            $"{knot.Count} weighing {knot.Weight} vs dare {dare} " +
+                            $"(nerve {_nerve:0.00})");
+                    }
+                    // Too MANY of them, whatever they weigh. What kills a
+                    // bot is the number of things swinging at it.
+                    if (knot.Count > EngagePackLimit(bot))
+                    {
+                        continue;
+                    }
                 }
 
                 int score = 0;
@@ -1840,6 +2068,14 @@ namespace Server.CustomBots
                 if (attackingFriend)
                 {
                     score += 400;
+                }
+                // Thin the herd: given the choice, take the straggler.
+                // Every extra monster standing with this one is a reason to
+                // pick a different one, which over a fight peels a group
+                // apart from the edges instead of engaging its middle.
+                if (!attackingMe && knot.Count > 1)
+                {
+                    score -= (knot.Count - 1) * 150;
                 }
                 // A foe the bot can SEE beats one it can't — engaging a
                 // target behind a wall means walking up and casting at it,
@@ -1854,15 +2090,102 @@ namespace Server.CustomBots
                 {
                     best = bc;
                     bestScore = score;
+                    _targetKnot = knot;
                     // Fighting back is right up to ~1.5x the ceiling;
                     // beyond that the right move is to run.
-                    bestOverwhelming = attackingMe && danger > dare * 3 / 2;
+                    bestOverwhelming = attackingMe && bc.HitsMax > dare * 3 / 2;
                 }
             }
 
             overwhelming = bestOverwhelming;
             return best;
         }
+
+        // The knot of monsters standing with the foe FindNearbyEnemy last
+        // picked. The engage branch reads it to decide whether the fight
+        // needs pulling first.
+        private ThreatPicture _targetKnot;
+
+        // ---- The pull ----
+        //
+        // Sometimes the only foe worth taking still has company. A player
+        // doesn't walk into the middle of that — they get its attention and
+        // back off, and the one that follows gets fought on its own while
+        // the rest lose interest. That is the whole technique for taking a
+        // group apart, and it's what these two fields do: while the window
+        // is open the bot walks away from the knot instead of into it.
+        //
+        // Bounded, because a bot that pulls forever never fights. It ends
+        // early the moment nothing but the target is still near.
+        private static readonly TimeSpan PullWindow = TimeSpan.FromSeconds(5);
+        private DateTime _pullUntil = DateTime.MinValue;
+        private Point3D  _pullFrom;
+
+        // Far enough off the knot to fight the one that followed. Ends the
+        // pull early — without it a bot walks backwards for the whole
+        // window even after it has already got what it wanted.
+        private const int PullClearDistance = 8;
+
+        // ---- NERVE ----
+        //
+        // How much trouble THIS bot takes on, and how long it stays in it.
+        // Every safety gate below is scaled by it.
+        //
+        // A shard where every bot reads the odds perfectly is its own kind
+        // of wrong: nothing ever dies to a monster, which is not what a
+        // world full of people looks like. Some players are careful and
+        // some are cocky, and the cocky ones get killed now and then —
+        // that is where a shard's monster deaths come from, and why the
+        // careful ones being alive means anything.
+        //
+        // Brave over-reaches and holds too long. Cautious leaves while it
+        // still can. Everyone else gets a small roll of their own, so no
+        // two bots draw the line in quite the same place.
+        private double _nerve = 1.0;
+
+        private void RollNerve(PlayerBot bot)
+        {
+            double nerve = 1.0;
+            if (bot.Personality.HasTrait(PersonalityTrait.Brave))    nerve += 0.65;
+            if (bot.Personality.HasTrait(PersonalityTrait.Cautious)) nerve -= 0.25;
+            nerve += Utility.RandomDouble() * 0.40 - 0.20;
+            _nerve = Math.Clamp(nerve, 0.60, 2.00);
+        }
+
+        // The pack size this bot will wade into. A bold one takes on one
+        // more than its tier says it should.
+        private int EngagePackLimit(PlayerBot bot) =>
+            MaxEngagePack(bot) + (_nerve >= 1.25 ? 1 : 0);
+
+        // Currently riding a fight out instead of retreating. Tracked only
+        // so the decision is logged once rather than every fast tick.
+        private bool _gambling;
+
+        // Fit to START a fight?
+        //
+        // The retreat threshold is the line below which this bot LEAVES a
+        // fight. Nothing checked it before picking a NEW one, and only the
+        // in-progress fight ever consulted it — so a bot that escaped a
+        // scorpion at 7 hit points turned straight round on the next
+        // decision tick and engaged the same scorpion, because a foe
+        // already attacking it skips the threat gate entirely. It did that
+        // until it died, resurrected, and did it again. Every monster
+        // death in the soak was this loop, not a bot misjudging a fight.
+        private bool TooHurtToStart(PlayerBot bot)
+        {
+            if (bot.HitsMax <= 0) return false;
+            double fitAt = (DefenderMode
+                ? DefenderRetreatHpFraction
+                : RetreatHpFraction) / _nerve;
+            return bot.Hits < bot.HitsMax * fitAt;
+        }
+
+        // ---- Withdrawing from a bad room ----
+        // Close enough to matter, and rare enough that a bot which cannot
+        // get clear stops trying and goes back to being useful.
+        private const int WithdrawRange = 5;
+        private static readonly TimeSpan WithdrawCooldown = TimeSpan.FromSeconds(30);
+        private DateTime _nextWithdrawAt = DateTime.MinValue;
 
         // Effective dare ceiling for this bot against this foe: the tier's
         // base ceiling, raised 60% for every friendly bot already fighting
@@ -1892,6 +2215,248 @@ namespace Server.CustomBots
             }
 
             return dare + (int)(dare * 0.6 * allies);
+        }
+
+        // -------------------------------------------------------------------
+        // AREA THREAT SURVEY
+        //
+        // A bot used to size up ONE monster and then walk to it. What
+        // killed it was everything standing NEXT to that monster: the dare
+        // gate passed on a lone orc's 60 hit points and the bot ran into
+        // six of them.
+        //
+        // This reads the whole neighbourhood instead, the way a player
+        // reads a room at a glance: how many hostiles, what they weigh
+        // together, how many are already on me, how close the nearest one
+        // is, and where the mass of them sits so I know which way is out.
+        // -------------------------------------------------------------------
+        private struct ThreatPicture
+        {
+            public int     Count;        // hostile monsters seen
+            public int     Weight;       // summed HitsMax - the pack's heft
+            public int     Attackers;    // how many are actually on the bot
+            public int     NearestDist;  // tiles to the closest one
+            public Point3D Center;       // where the mass of them sits
+            public bool    Any => Count > 0;
+        }
+
+        // What counts as a monster. Same test FindNearbyEnemy picks targets
+        // by, pulled out so the survey and the target picker can never
+        // disagree about what is and isn't a threat.
+        private static bool IsHostileMonster(Mobile m) =>
+            m is BaseCreature bc && !bc.Deleted && bc.Alive &&
+            bc.ControlMaster == null && !bc.Summoned &&
+            bc.FightMode != FightMode.None && bc.Karma < 0;
+
+        // Survey the hostiles within `radius` of `at`. `at` is usually the
+        // bot's own tile (what is on me) or a candidate foe's tile (what
+        // comes WITH that foe if I start on it).
+        private static ThreatPicture Survey(PlayerBot bot, Point3D at, int radius)
+        {
+            var p = new ThreatPicture { NearestDist = int.MaxValue, Center = at };
+            if (bot.Map == null) return p;
+
+            long sx = 0, sy = 0;
+            foreach (var m in bot.Map.GetMobilesInRange(at, radius))
+            {
+                if (m == bot || !IsHostileMonster(m)) continue;
+                var bc = (BaseCreature)m;
+
+                p.Count++;
+                p.Weight += bc.HitsMax;
+                if (bc.Combatant == bot) p.Attackers++;
+
+                int d = TileDist(bot, bc.Location);
+                if (d < p.NearestDist) p.NearestDist = d;
+
+                sx += bc.X;
+                sy += bc.Y;
+            }
+
+            if (p.Count > 0)
+            {
+                p.Center = new Point3D((int)(sx / p.Count), (int)(sy / p.Count), bot.Z);
+            }
+            else
+            {
+                p.NearestDist = int.MaxValue;
+            }
+            return p;
+        }
+
+        // The survey around the BOT, cached for a second. CheckRetreat runs
+        // on the ~300ms fast loop and a fresh sector scan every fire is
+        // waste - monsters do not teleport in, and a second-old picture is
+        // still a second fresher than the 2s decision tick ever was.
+        private ThreatPicture _near;
+        private DateTime      _nearAt = DateTime.MinValue;
+
+        private ThreatPicture NearThreat(PlayerBot bot)
+        {
+            if (Core.Now >= _nearAt)
+            {
+                _near   = Survey(bot, bot.Location, SightRange);
+                _nearAt = Core.Now + TimeSpan.FromSeconds(1.0);
+            }
+            return _near;
+        }
+
+        // The bot's own dare ceiling with no crowd bonus - what it can
+        // answer on its own.
+        private static int BaseDare(PlayerBot bot)
+        {
+            int rank = BotSkillTierHelper.Rank(bot.SkillTier);
+            if (rank < 0) rank = 0;
+            else if (rank >= TierDare.Length) rank = TierDare.Length - 1;
+            return TierDare[rank];
+        }
+
+        // Friendly bots in the fight beside this one. Numbers change what a
+        // room is worth standing in, both for engaging and for leaving.
+        private static int FriendlyFighters(PlayerBot bot)
+        {
+            int n = 0;
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, 8))
+            {
+                if (m != bot && m is PlayerBot f && f.Alive && !f.Deleted &&
+                    f.Combatant != null)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        // How much monster this bot can stand in the middle of before the
+        // room itself is the problem, friends counted in.
+        private static int RoomBudget(PlayerBot bot) =>
+            BaseDare(bot) * (1 + FriendlyFighters(bot));
+
+        // How many separate monsters a bot will take on at once, by tier.
+        // Weight alone is not the whole story - eight mongbats do not weigh
+        // much and will still kill an apprentice, because what hurts is the
+        // number of things swinging, not the size of their hit point pools.
+        private static readonly int[] TierPack =
+        {
+            1,   // Novice
+            2,   // Apprentice
+            2,   // Journeyman
+            3,   // Adept
+            3,   // Expert
+            4,   // Master
+            4,   // Grandmaster
+        };
+
+        private static int MaxEngagePack(PlayerBot bot)
+        {
+            int rank = BotSkillTierHelper.Rank(bot.SkillTier);
+            if (rank < 0) rank = 0;
+            else if (rank >= TierPack.Length) rank = TierPack.Length - 1;
+            return TierPack[rank] + FriendlyFighters(bot);
+        }
+
+        // -------------------------------------------------------------------
+        // ESCAPE ROUTING
+        //
+        // The old flee stepped one tile directly away from the single
+        // monster it was running from, twice, every fast tick. Blind: it
+        // backed into walls, shuffled along them, and ran straight through
+        // the rest of the pack because it only ever looked at one of them.
+        //
+        // A fleeing bot now picks a real waypoint to run to - one further
+        // from the mass of monsters than it is now, and close enough that
+        // A* can reach it in a single leg - and PathFollower routes it
+        // there around the walls. Arriving still in trouble chains to the
+        // next node out, so the bot works its way along the road network
+        // instead of into a corner. Blind sprinting stays as the fallback
+        // for ground with no waypoints near it.
+        // -------------------------------------------------------------------
+
+        // How many nearby nodes to consider, and the furthest one A* will
+        // reliably reach in a single leg. 30 was too greedy: a quarter of
+        // the routes picked were nodes the pathfinder then could not walk
+        // to, which costs the bot the two seconds it takes to notice. A
+        // shorter hop it can actually make beats a longer one it can't —
+        // and the chain-to-the-next-node-on-arrival covers the distance
+        // anyway.
+        private const int EscapeNodeSample = 10;
+        private const int EscapeLegMax     = 20;
+
+        private Point3D?     _escapeGoal;
+        private PathFollower _escapeFollower;
+        private int          _escapeStalls;
+        private readonly List<WaypointNode> _escapeCandidates = new();
+
+        // Escape goals the route follower could not actually reach from
+        // where the bot was. Euclidean distance picks them — seventeen
+        // tiles looks fine — and A* then fails across a wall or a Z change
+        // and the bot stands still. One bot was handed the same failing
+        // node four times in a row. A goal that stalled is skipped on the
+        // next pick, so a different node gets its turn.
+        private readonly HashSet<string> _stalledEscapeGoals =
+            new(StringComparer.OrdinalIgnoreCase);
+        private string _escapeGoalName;
+
+        private Point3D? PickEscapeGoal(PlayerBot bot, Point3D away)
+        {
+            var graph = WaypointRegistry.Graph;
+            if (graph == null || graph.NodeCount == 0) return null;
+
+            _escapeCandidates.Clear();
+            try { graph.FindNearestNodes(bot.Location, EscapeNodeSample, _escapeCandidates); }
+            catch { return null; }
+            if (_escapeCandidates.Count == 0) return null;
+
+            int hereFromThreat = TileDist(bot.Location, away);
+
+            WaypointNode best = null;
+            int bestScore = int.MinValue;
+
+            foreach (var n in _escapeCandidates)
+            {
+                int leg = TileDist(bot.Location, n.Location);
+                // Too close to be worth routing to, or too far for one A*
+                // leg (a failed path leaves the bot standing still, which
+                // in a flee is fatal).
+                if (leg < 4 || leg > EscapeLegMax) continue;
+                if (_stalledEscapeGoals.Contains(n.Name)) continue;
+
+                // It has to be genuinely further out than standing still is.
+                int fromThreat = TileDist(n.Location, away);
+                if (fromThreat <= hereFromThreat + 3) continue;
+
+                // Distance from the pack is what matters; the walk there is
+                // a mild tiebreak, and a junction beats a dead end because
+                // the next hop out has somewhere to go.
+                // Reachability is worth as much as distance here — the
+                // walk being short is what makes the path succeed.
+                int score = fromThreat * 3 - leg * 2 +
+                            (n.Connects != null ? n.Connects.Count * 2 : 0);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = n;
+                }
+            }
+
+            _escapeGoalName = best?.Name;
+            return best?.Location;
+        }
+
+        private void SetEscapeRoute(PlayerBot bot, Point3D away)
+        {
+            _escapeGoal = PickEscapeGoal(bot, away);
+            _escapeFollower = _escapeGoal.HasValue
+                ? new PathFollower(bot, _escapeGoal.Value)
+                : null;
+            _escapeStalls = 0;
+        }
+
+        private void ClearEscapeRoute()
+        {
+            _escapeGoal = null;
+            _escapeFollower = null;
+            _escapeStalls = 0;
         }
 
         // -------------------------------------------------------------------
@@ -2003,44 +2568,183 @@ namespace Server.CustomBots
             // threat with double-steps and uses any healing it has. It
             // keeps fleeing until it's well clear or the flee timer runs
             // out, then resumes normal behavior.
-            if (_fleeFrom != null)
+            if (_fleeing)
             {
-                var threat = _fleeFrom;
-                bool threatGone = threat.Deleted || !threat.Alive ||
-                                  threat.Map != bot.Map;
-                int fdist = threatGone ? 999 : TileDist(bot, threat.Location);
+                // What the bot is running from is the whole neighbourhood,
+                // not one monster — but the specific thing that started the
+                // flee still counts on its own. The survey only sees
+                // MONSTERS, so testing it alone made a bot running from a
+                // red PK go clear on its first tick, stop, get hit, and
+                // flee again: the same name over and over at the same hit
+                // points. It is clear when BOTH are.
+                var near = NearThreat(bot);
 
-                // Clear of danger, or the flee window expired → stop
-                // fleeing. The decision tick decides what to do next
-                // (defenders resume travel, hunters head home).
-                if (threatGone || fdist >= SightRange + 4 ||
-                    Core.Now >= _fleeUntil)
+                bool fromGone = _fleeFrom == null || _fleeFrom.Deleted ||
+                                !_fleeFrom.Alive || _fleeFrom.Map != bot.Map;
+                int fromDist = fromGone
+                    ? int.MaxValue
+                    : TileDist(bot, _fleeFrom.Location);
+
+                bool monstersClear = !near.Any || near.NearestDist >= SightRange + 4;
+                bool chaserClear   = fromGone || fromDist >= SightRange + 4;
+
+                if (monstersClear && chaserClear || Core.Now >= _fleeUntil)
                 {
+                    _fleeing  = false;
                     _fleeFrom = null;
+                    ClearEscapeRoute();
                     StopStepTimer();
                     return;
                 }
 
                 // While running, keep healing. A melee bot bandages /
                 // drinks potions; a mage casts heal/cure. This is what
-                // actually keeps a fleeing bot alive.
+                // actually keeps a fleeing bot alive. In swing range that
+                // means potions, not a 4th-circle cast nothing will let it
+                // finish.
+                int closest = Math.Min(near.NearestDist, fromDist);
+
+                // A cast roots the caster for two seconds or more, and a
+                // chaser five tiles back covers that in one. A fleeing mage
+                // drinks unless it has real room; the cure-or-heal CAST is
+                // for when the pursuit has fallen well behind.
                 if (SpellcasterMode)
                 {
-                    TrySelfCare(bot);
+                    TrySelfCare(bot, inSwingRange: closest <= 5);
                 }
                 else
                 {
                     TryMeleeSelfHeal(bot);
                 }
 
-                // Sprint away — double-step so the bot genuinely outpaces
-                // the pursuer instead of being chased down at equal speed.
                 if (bot.Frozen) bot.Frozen = false;
-                var faceThreat = bot.GetDirectionTo(threat);
-                StepAway(bot, faceThreat, threat);
-                var faceThreat2 = bot.GetDirectionTo(threat);
-                StepAway(bot, faceThreat2, threat);
+
+                // ROOTED, not stuck. A bot mid-cast (its own heal) or held
+                // by a Paralyze cannot take a step, and the route below
+                // counted every such tick as a stall: six of them — one
+                // Greater Heal — and it threw the route away and sprinted
+                // blind into whatever was there. Half of all surface escapes
+                // ended that way. Standing still is the engine's doing; the
+                // route is still good, so keep it and wait to be free.
+                if (bot.Spell != null || bot.Paralyzed)
+                {
+                    return;
+                }
+
+                // Run from the mass of monsters when there is one, else
+                // from whatever single thing is chasing.
+                Point3D away = near.Any ? near.Center
+                             : !fromGone ? _fleeFrom.Location
+                             : bot.Location;
+
+                // ROUTED ESCAPE — walk a real path to a waypoint out of
+                // here. A* goes around the walls the blind sprint used to
+                // shuffle along.
+                if (_escapeFollower != null)
+                {
+                    var before = bot.Location;
+                    bool reachedNode = false;
+                    try { reachedNode = _escapeFollower.Follow(true, ArrivalRange); }
+                    catch { reachedNode = false; }
+
+                    if (reachedNode)
+                    {
+                        // Made it and still not clear — chain to the next
+                        // node further out rather than stopping here.
+                        SetEscapeRoute(bot, away);
+                        return;
+                    }
+
+                    if (bot.Location != before)
+                    {
+                        _escapeStalls = 0;
+                        return;   // moving along the route, nothing else to do
+                    }
+
+                    // The route isn't moving the bot — blocked path, a door
+                    // it can't solve, a goal it can't stand on. Standing
+                    // still while fleeing is fatal, so fall through to the
+                    // blind sprint, and give up on the route entirely if it
+                    // keeps failing.
+                    if (++_escapeStalls >= 6)
+                    {
+                        if (CombatDebug)
+                        {
+                            Console.WriteLine(
+                                $"[Bot {bot.Name}] escape route stalled — sprinting blind");
+                        }
+                        if (_escapeGoalName != null)
+                        {
+                            _stalledEscapeGoals.Add(_escapeGoalName);
+                        }
+                        ClearEscapeRoute();
+
+                        // Try once more with that node off the table before
+                        // giving up on routing altogether.
+                        SetEscapeRoute(bot, away);
+                        if (_escapeFollower != null)
+                        {
+                            return;
+                        }
+                    }
+                }
+
+                // BLIND SPRINT — the fallback, and the only option on
+                // ground with no waypoints near it. Double-stepped so the
+                // bot genuinely outpaces a same-speed pursuer, and aimed
+                // away from the CENTRE OF THE PACK rather than away from
+                // whichever single monster triggered the retreat.
+                var out1 = bot.GetDirectionTo(away);
+                StepAwayFrom(bot, out1);
+                var out2 = bot.GetDirectionTo(away);
+                StepAwayFrom(bot, out2);
                 return;
+            }
+
+            // ===== THE PULL — drag one monster off the group =====
+            // Runs ahead of the chase so a melee bot walks AWAY from the
+            // knot for a moment instead of straight into it. The foe we
+            // aggroed follows; its friends fall behind. Ends the instant
+            // nothing but the foe is still close, or when the window runs
+            // out and the bot just fights where it stands.
+            if (Core.Now < _pullUntil)
+            {
+                var pullFoe = _chaseFoe ?? bot.Combatant as Mobile;
+                if (pullFoe == null || pullFoe.Deleted || !pullFoe.Alive ||
+                    pullFoe.Map != bot.Map)
+                {
+                    _pullUntil = DateTime.MinValue;
+                }
+                else if (CheckRetreat(bot, pullFoe))
+                {
+                    // Pulling is not worth dying for.
+                    return;
+                }
+                else
+                {
+                    var pnear = NearThreat(bot);
+                    if (pnear.Count <= 1 ||
+                        TileDist(bot.Location, _pullFrom) >= PullClearDistance)
+                    {
+                        // Nothing but the target still near, or far enough
+                        // off the knot that the rest won't join in. Turn
+                        // and fight it.
+                        _pullUntil = DateTime.MinValue;
+                        if (CombatDebug)
+                        {
+                            Console.WriteLine(
+                                $"[Bot {bot.Name}] pull SEPARATED '{pullFoe.Name}'");
+                        }
+                    }
+                    else
+                    {
+                        if (bot.Frozen) bot.Frozen = false;
+                        StepAwayFrom(bot, bot.GetDirectionTo(_pullFrom));
+                        var pd = bot.GetDirectionTo(pullFoe);
+                        if (bot.Direction != pd) bot.Direction = pd;
+                        return;
+                    }
+                }
             }
 
             // Greedy chase mode — pursue a live foe with fast single steps.
@@ -2167,9 +2871,18 @@ namespace Server.CustomBots
 
                     // No cursor yet and the spell object is gone — the
                     // cast was disturbed/fizzled before producing a
-                    // target. Treat as a failed cast: short cooldown.
+                    // target. Pre-AOS that is a SILENT kill: a single hit
+                    // landed mid-cast, Disturb ran, and no fizzle effect
+                    // or message goes out for it. Treat as a failed cast:
+                    // short cooldown.
                     if (!stillCasting && cursor == null)
                     {
+                        if (CombatDebug)
+                        {
+                            Console.WriteLine(
+                                $"[Bot {bot.Name}] cast DISTURBED by '{rf.Name}' " +
+                                $"(dist {rdist})");
+                        }
                         ClearCast();
                         _nextCastAllowed = Core.Now + TimeSpan.FromSeconds(1.5);
                         return;
@@ -2199,56 +2912,126 @@ namespace Server.CustomBots
                 bool haveLOS    = HasLOS(bot, rf);
                 bool castReady  = SpellcasterMode && Core.Now >= _nextCastAllowed;
 
+                // The band a ranged bot holds is measured against the ROOM,
+                // not just against the one thing it is shooting. Kiting a
+                // single orc perfectly while three of its friends walk up
+                // behind is not kiting. In a crowd the band widens and the
+                // bot backs off the CENTRE of the pack, which pulls its
+                // target away from the rest — one monster gets shot, the
+                // group thins.
+                var rnear = NearThreat(bot);
+                bool crowd = rnear.Count >= 2;
+                int standoffMin = crowd
+                    ? Math.Min(StandoffMax - 1, StandoffMin + 2)
+                    : StandoffMin;
+
                 // TOO CLOSE — kite away to reopen the gap. A same-speed
                 // kite can't open distance one-step-at-a-time, so when the
                 // foe is adjacent we DOUBLE-STEP: two retreat tiles this
                 // fire. That actually creates separation instead of just
                 // shuffling alongside the monster.
-                if (rdist < StandoffMin)
+                if (rdist < standoffMin ||
+                    (crowd && rnear.NearestDist < standoffMin))
                 {
                     if (bot.Frozen) bot.Frozen = false;
 
-                    // TANK MAGE at melee range: no kiting. Re-arm the
-                    // weapon (the last cast pocketed it) and stand in —
-                    // the engine swings it while the next spell comes off
-                    // cooldown. The T2A hally-mage rhythm.
+                    // In a crowd, back off the mass of them; the target
+                    // follows and the rest are left behind. Alone, back off
+                    // the target itself.
+                    var kiteFrom = crowd
+                        ? bot.GetDirectionTo(rnear.Center)
+                        : rface;
+
+                    // TANK MAGE at melee range: the weapon is the damage.
+                    // Re-arm it (the last cast pocketed it) and let the
+                    // engine swing — the T2A hally-mage rhythm.
+                    //
+                    // What it must NOT do is plink a point-blank Magic
+                    // Arrow, which is what it used to do every time the
+                    // cooldown came up. Casting pockets the weapon again,
+                    // so that arrow costs a halberd swing to deal about
+                    // five damage: strictly worse than staying silent. It
+                    // was also the single largest source of Magic Arrows in
+                    // the whole shard.
+                    //
+                    // When it wants a real spell it does what every other
+                    // mage does — makes room, throws it from the band, and
+                    // walks back in.
                     if (_tankMage && rdist <= 2)
                     {
                         RearmTankWeapon(bot);
-                        if (castReady && haveLOS)
+
+                        if (castReady && haveLOS &&
+                            TrySelfCare(bot, inSwingRange: !rf.Paralyzed))
                         {
-                            if (!TrySelfCare(bot))
-                            {
-                                BeginCast(bot, rf, pointBlank: true);
-                            }
+                            return;
+                        }
+
+                        // Worth breaking the rhythm for? Only for a spell
+                        // that beats a halberd swing, and only sometimes —
+                        // a hally mage that backed off before every cast
+                        // would never land a blow.
+                        if (castReady && bot.Mana >= TankMageRoomMana &&
+                            Utility.RandomDouble() < TankMageRoomChance)
+                        {
+                            StepAwayFrom(bot, kiteFrom);
+                            StepAwayFrom(bot, kiteFrom);
                         }
                         return;
                     }
 
-                    StepAway(bot, rface, rf);
+                    bool moved = StepAwayFrom(bot, kiteFrom);
                     // Adjacent / nearly so → take a second retreat step to
                     // genuinely outpace the monster.
-                    if (rdist <= 2)
+                    if (rdist <= 2 || (crowd && rnear.NearestDist <= 2))
                     {
-                        var rf2 = bot.GetDirectionTo(rf);
-                        StepAway(bot, rf2, rf);
+                        moved |= StepAwayFrom(bot, crowd
+                            ? bot.GetDirectionTo(NearThreat(bot).Center)
+                            : bot.GetDirectionTo(rf));
                     }
 
-                    // CORNERED: self-care takes priority — a cornered mage
-                    // that's poisoned or badly hurt should cure/heal rather
-                    // than trade point-blank Fireballs. If self-care didn't
-                    // fire, cast an attack spell point-blank.
+                    // THE BREAK-AWAY, and the reason this whole branch
+                    // exists. Casting roots the caster. A bot that answers
+                    // every adjacent monster with an instant point-blank
+                    // spell therefore never leaves melee at all: it steps
+                    // twice, plants itself to chant, the monster walks back
+                    // in, and the entire fight is Magic Arrows at arm's
+                    // length — which is exactly what it looked like.
+                    //
+                    // So while the retreat is still working, these ticks are
+                    // spent WALKING and nothing is cast. Two or three of
+                    // them buys the gap the book needs, and the next tick
+                    // through the band below throws a real spell.
+                    if (_kiteBreakSince == DateTime.MinValue)
+                    {
+                        _kiteBreakSince = Core.Now;
+                    }
+
+                    // It gives up only for a reason: pinned, so the steps
+                    // did nothing, or a foe that simply matches its speed.
+                    // Then point-blank Magic Arrow is right again — it is
+                    // the one spell that lands through the blows.
+                    bool pinned   = !moved;
+                    bool outpaced = Core.Now - _kiteBreakSince >= KiteBreakGrace;
+
+                    // Self-care is never held back by the footwork: a
+                    // poisoned or badly hurt mage cures and heals whatever
+                    // its feet are doing.
                     if (castReady && haveLOS && rdist <= 2)
                     {
-                        if (!TrySelfCare(bot))
+                        if (!TrySelfCare(bot, inSwingRange: !rf.Paralyzed) &&
+                            (pinned || outpaced))
                         {
+                            _castReason = pinned ? "pinned" : "outpaced";
                             BeginCast(bot, rf, pointBlank: true);
                         }
                     }
                     return;
                 }
 
-                // TOO FAR — close the gap.
+                // TOO FAR — close the gap. (StandoffMax is unchanged by a
+                // crowd; only the near edge of the band moves out, so a
+                // widened band can never invert.)
                 if (rdist > StandoffMax)
                 {
                     StepToward(bot, rface);
@@ -2265,10 +3048,16 @@ namespace Server.CustomBots
                 // IN BAND, LOS clear — attack, or self-care first.
                 // Archer: just stand; ModernUO's combat fires the bow.
                 // Mage: cure/heal if needed, otherwise cast at the foe.
+                //
+                // Standing here at all means the retreat worked, so the
+                // grace is re-armed for the next time something closes.
+                _kiteBreakSince = DateTime.MinValue;
+
                 if (castReady)
                 {
                     if (!TrySelfCare(bot))
                     {
+                        _castReason = "band";
                         BeginCast(bot, rf);
                     }
                 }
@@ -2294,6 +3083,25 @@ namespace Server.CustomBots
                 StopStepTimer();
                 _follower = null;
             }
+        }
+
+        // Step one tile directly away from whatever `toward` points at;
+        // flow around blockers. Same as StepAway but takes a direction, so
+        // it works for running from a POINT (the centre of a pack) as well
+        // as from a mobile.
+        // Returns whether a tile was actually given up. False means pinned
+        // — every way back is blocked — which is the signal the break-away
+        // uses to stop trying and fight where it stands.
+        private static bool StepAwayFrom(PlayerBot bot, Direction toward)
+        {
+            var away = (Direction)(((int)toward + 4) & 0x7);
+            if (bot.Move(away))
+            {
+                return true;
+            }
+            var l = (Direction)(((int)away + 7) & 0x7);
+            var r = (Direction)(((int)away + 1) & 0x7);
+            return bot.Move(l) || bot.Move(r);
         }
 
         // Step one tile directly away from the foe; flow around blockers.
@@ -2341,7 +3149,7 @@ namespace Server.CustomBots
             if (CombatDebug)
             {
                 Console.WriteLine(
-                    $"[Bot {bot.Name}] fleeing from '{threat?.Name}' " +
+                    $"[Bot {bot.Name}] fleeing from '{threat?.Name ?? "the area"}' " +
                     $"(hp {bot.Hits}/{bot.HitsMax})");
             }
 
@@ -2350,9 +3158,36 @@ namespace Server.CustomBots
             _rangedFoe = null;
             _goal      = null;
             _follower  = null;
+            _pullUntil = DateTime.MinValue;
             ClearCast();
             _fleeFrom  = threat;
-            _fleeUntil = Core.Now + TimeSpan.FromSeconds(8.0);
+            _fleeing   = true;
+            _stalledEscapeGoals.Clear();
+
+            // Run from the MASS of them, not from the one that happened to
+            // trigger the retreat. Running from a single monster inside a
+            // pack is how a bot ends up sprinting through the rest of it.
+            var near = NearThreat(bot);
+            Point3D away = near.Any ? near.Center
+                         : threat != null ? threat.Location
+                         : bot.Location;
+
+            SetEscapeRoute(bot, away);
+
+            if (CombatDebug)
+            {
+                Console.WriteLine(_escapeGoal.HasValue
+                    ? $"[Bot {bot.Name}] escape route to {_escapeGoal.Value} " +
+                      $"({TileDist(bot.Location, _escapeGoal.Value)} tiles)"
+                    : $"[Bot {bot.Name}] no escape route — sprinting blind");
+            }
+
+            // A routed escape is a real walk to somewhere, so it gets long
+            // enough to finish. Blind sprinting keeps the old short window
+            // — with nowhere to aim, more time just means more shuffling.
+            _fleeUntil = Core.Now +
+                TimeSpan.FromSeconds(_escapeFollower != null ? 20.0 : 8.0);
+
             EnsureStepTimer(bot, running: true);
         }
 
@@ -2363,19 +3198,86 @@ namespace Server.CustomBots
         private bool CheckRetreat(PlayerBot bot, Mobile threat)
         {
             if (threat == null || threat.Deleted || !threat.Alive) return false;
-            double retreatAt = DefenderMode
+
+            var near = NearThreat(bot);
+            _packAttackers = near.Attackers;
+
+            // HOPELESS — leave on the numbers, before the hit points.
+            //
+            // The HP threshold below only ever fires once the damage is
+            // already done, and against a pack the run out is longer than
+            // the health left to pay for it. A player surrounded by more
+            // than they can answer leaves at FULL health; they don't stand
+            // there to see how it goes. Two or more already swinging and a
+            // room weighing twice what this bot can handle is that moment.
+            if (near.Attackers >= 2 && near.Weight > RoomBudget(bot) * 2 * _nerve)
+            {
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bot {bot.Name}] OUTNUMBERED — {near.Attackers} on me, " +
+                        $"room weighs {near.Weight} vs budget {RoomBudget(bot)} " +
+                        $"(hp {bot.Hits}/{bot.HitsMax})");
+                }
+                StartFlee(bot, threat);
+                return true;
+            }
+
+            // THE GAMBLE — "I can take it."
+            //
+            // Widening nerve alone was not enough to put monster deaths on
+            // the board: a bold bot would start a fight over its head, get
+            // hurt, and then escape cleanly every single time, because the
+            // retreat and the routed run-away work. Bots were dying at
+            // roughly four an hour, which reads as a world where nothing
+            // is dangerous.
+            //
+            // What is missing is the decision players actually die to. A
+            // bold one that is losing, against something that is losing
+            // HARDER, does not run — it swings for the kill. Most of the
+            // time it wins the race and it looks like nerve. Sometimes the
+            // monster wins it, and that is a death that came from a call
+            // somebody made, not from walking into a camp unlooked-at.
+            //
+            // Deliberately narrow: bold bots only, one-on-one only, and
+            // only while the foe is clearly worse off. A swarm still drags
+            // the bot out through the OUTNUMBERED check above, which runs
+            // first for exactly that reason.
+            if (_nerve >= 1.3 && near.Attackers <= 1 && threat.HitsMax > 0 &&
+                bot.HitsMax > 0)
+            {
+                double mine   = (double)bot.Hits / bot.HitsMax;
+                double theirs = (double)threat.Hits / threat.HitsMax;
+
+                if (theirs < mine * 0.9)
+                {
+                    if (CombatDebug && !_gambling)
+                    {
+                        Console.WriteLine(
+                            $"[Bot {bot.Name}] GAMBLING on '{threat.Name}' — " +
+                            $"me {bot.Hits}/{bot.HitsMax}, it {threat.Hits}/" +
+                            $"{threat.HitsMax} (nerve {_nerve:0.00})");
+                    }
+                    _gambling = true;
+                    return false;   // no retreat: swing for the kill
+                }
+            }
+            _gambling = false;
+
+            // Nerve moves the bail line too: the bold hold on into the red,
+            // the careful are gone at two thirds.
+            double retreatAt = (DefenderMode
                 ? DefenderRetreatHpFraction
-                : RetreatHpFraction;
+                : RetreatHpFraction) / _nerve;
 
             // Gang pressure: surviving a swarm means leaving EARLIER —
             // incoming damage scales with attackers, the escape run
             // doesn't. Each attacker past the first raises the bail
-            // threshold a notch (capped so a mob doesn't make bots
-            // flee at a scratch).
-            int extra = _packAttackers - 1;
+            // threshold a notch.
+            int extra = near.Attackers - 1;
             if (extra > 0)
             {
-                retreatAt = Math.Min(0.90, retreatAt + 0.08 * Math.Min(3, extra));
+                retreatAt = Math.Min(0.95, retreatAt + 0.10 * Math.Min(4, extra));
             }
 
             if (bot.HitsMax > 0 && bot.Hits < bot.HitsMax * retreatAt)
@@ -2384,22 +3286,6 @@ namespace Server.CustomBots
                 return true;
             }
             return false;
-        }
-
-        // Hostiles actively targeting the bot right now (the current foe
-        // included). Feeds the gang-pressure retreat scaling above.
-        private static int CountAttackers(PlayerBot bot)
-        {
-            int n = 0;
-            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, 6))
-            {
-                if (m is BaseCreature bc && !bc.Deleted && bc.Alive &&
-                    bc.Combatant == bot)
-                {
-                    n++;
-                }
-            }
-            return n;
         }
 
         // (The old invisible combat-supply refill is GONE — un-T2A. Kits

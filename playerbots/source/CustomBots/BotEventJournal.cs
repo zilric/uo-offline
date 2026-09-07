@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using Server;
+using Server.Mobiles;
 
 namespace Server.CustomBots
 {
@@ -64,7 +65,9 @@ namespace Server.CustomBots
                 ["faction"]  = 3.5, // shield war street kills
                 ["warclash"] = 3.0, // war bands met — a street battle
                 ["death"]    = 3.0,
-                ["red"]      = 2.0, // a red was SPOTTED — warn people
+                ["red"]      = 0.8, // a red was SPOTTED. Sightings outnumber
+                                    // murders three to one even deduplicated,
+                                    // so at 2.0 they were most of the talk
                 ["duel"]     = 2.0,
                 ["kill"]     = 1.5,
                 ["party"]    = 1.5,
@@ -127,13 +130,37 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         public static void Record(string type, string actor, string other, Point3D loc, Map map)
         {
+            var place = PlaceName(loc, map);
+
+            // A red walks past a bank and six witnesses each file the same
+            // sighting. Half the journal was "red" that way — 199 of 400
+            // rows — and half the gossip on the shard was the same warning
+            // about the same red with a different name in front of it. One
+            // sighting per red per place per ten minutes is the news.
+            if (type == "red")
+            {
+                for (int i = _ring.Count - 1; i >= 0; i--)
+                {
+                    var prior = _ring[i];
+                    if (Core.Now - prior.At > TimeSpan.FromMinutes(10))
+                    {
+                        break;
+                    }
+                    if (prior.Type == "red" && prior.Place == place &&
+                        string.Equals(prior.Other, other, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+                }
+            }
+
             var ev = new BotEvent
             {
                 At    = Core.Now,
                 Type  = type,
                 Actor = actor ?? "",
                 Other = other ?? "",
-                Place = PlaceName(loc, map),
+                Place = place,
                 X     = loc.X,
                 Y     = loc.Y,
             };
@@ -216,6 +243,77 @@ namespace Server.CustomBots
         // its name (or its city for wider hits). Else the region, else
         // "the wilderness".
         // -------------------------------------------------------------------
+        // Nobody died "at Vesper Provisioner 9". They died in Vesper. A
+        // destination's NAME is an authoring handle — numbered, typed,
+        // unique — and it read as one every time gossip repeated it. A
+        // shop, forge or bank is its town; a landmark keeps its name with
+        // the number filed off; the synthetic spots get the words a
+        // person would use.
+        private static string Humanize(BotDestination d)
+        {
+            if (d == null)
+            {
+                return "the wilderness";
+            }
+
+            switch (d.Type)
+            {
+                case DestinationType.Bank:
+                case DestinationType.Tavern:
+                case DestinationType.Inn:
+                case DestinationType.Forge:
+                case DestinationType.Healer:
+                case DestinationType.Library:
+                case DestinationType.Stables:
+                case DestinationType.CityCenter:
+                case DestinationType.VendorSmith:
+                case DestinationType.VendorMage:
+                case DestinationType.VendorTailor:
+                case DestinationType.VendorCarpenter:
+                case DestinationType.VendorBowyer:
+                case DestinationType.VendorAlchemist:
+                case DestinationType.VendorWeaponer:
+                case DestinationType.VendorProvisioner:
+                    if (!string.IsNullOrEmpty(d.City))
+                    {
+                        return d.City;
+                    }
+                    break;
+                case DestinationType.TreasureSite:
+                    return "a dig site";
+                case DestinationType.Dock:
+                    return !string.IsNullOrEmpty(d.City) ? $"the {d.City} docks" : "the docks";
+                case DestinationType.MiningSpot:
+                    return "the mines";
+                case DestinationType.LumberSpot:
+                    return "the woods";
+                case DestinationType.GatherSpot:
+                    return "the wilds";
+                case DestinationType.Graveyard:
+                    return !string.IsNullOrEmpty(d.City) ? $"the {d.City} graveyard" : "the graveyard";
+                case DestinationType.Crossroads:
+                case DestinationType.Bridge:
+                    if (!string.IsNullOrEmpty(d.City))
+                    {
+                        return $"outside {d.City}";
+                    }
+                    break;
+            }
+
+            // "Honor Shrine" stays; "Moongate 134" and "WP 55" are handles.
+            var name = d.Name ?? "";
+            name = System.Text.RegularExpressions.Regex.Replace(name, @"\s+\d+[a-z]?$", "");
+            if (name.Length == 0 || name.StartsWith("WP", StringComparison.OrdinalIgnoreCase))
+            {
+                return !string.IsNullOrEmpty(d.City) ? $"outside {d.City}" : "the road";
+            }
+            if (name.StartsWith("Moongate", StringComparison.OrdinalIgnoreCase))
+            {
+                return !string.IsNullOrEmpty(d.City) ? $"the {d.City} moongate" : "a moongate";
+            }
+            return name;
+        }
+
         public static string PlaceName(Point3D loc, Map map)
         {
             // Inside a dungeon the REGION carries the canonical name
@@ -258,7 +356,7 @@ namespace Server.CustomBots
                 }
                 if (bestDist <= 20)
                 {
-                    return best.Name;
+                    return Humanize(best);
                 }
                 if (bestDist <= 80 && !string.IsNullOrEmpty(best.City))
                 {
@@ -266,7 +364,7 @@ namespace Server.CustomBots
                 }
                 if (bestDist <= 80)
                 {
-                    return $"near {best.Name}";
+                    return $"near {Humanize(best)}";
                 }
             }
 
@@ -299,7 +397,71 @@ namespace Server.CustomBots
         // weight per telling), and a template that needs a token the
         // event doesn't have (a self-kill has no {other}) is never picked.
         // -------------------------------------------------------------------
-        public static string ComposeGossip(string speakerName, Point3D speakerLoc)
+        // News you can HEAR ABOUT. A thing that happened this close and this
+        // recently is a thing you are standing in — the event lines cover
+        // that live; gossip is what reaches you from somewhere else. This
+        // is also what stopped a bot mid-fight with a red from turning to
+        // the player to mention there were reds about.
+        private const int HereRadius = 40;
+        private static readonly TimeSpan HereAge = TimeSpan.FromMinutes(20);
+
+        // How far and how old before the details go soft. Close and fresh,
+        // you have the names. Further out it is "someone got killed at
+        // Shame". Rumour losing its edges with distance is what makes it
+        // rumour instead of a news feed.
+        private const int VividRadius = 400;
+        private const int VagueRadius = 1200;
+        private static readonly TimeSpan VividAge = TimeSpan.FromMinutes(45);
+
+        // A killer named this many times in the ring is a known name, and
+        // the line changes: not "X killed Y" but "X again".
+        private const int RepeatKillerAt = 3;
+
+        // What each speaker has told lately. Weight decay spreads a story
+        // across the SHARD; it does nothing to stop one bot telling the
+        // same one three times running when there is little else to say.
+        private static readonly Dictionary<string, List<(BotEvent ev, DateTime at)>> _told =
+            new(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan RetellAfter = TimeSpan.FromMinutes(15);
+
+        private static bool ToldRecently(string speaker, BotEvent ev, DateTime now)
+        {
+            if (!_told.TryGetValue(speaker, out var list))
+            {
+                return false;
+            }
+            list.RemoveAll(t => now - t.at > RetellAfter);
+            foreach (var t in list)
+            {
+                if (ReferenceEquals(t.ev, ev))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static void NoteTold(string speaker, BotEvent ev, DateTime now)
+        {
+            if (!_told.TryGetValue(speaker, out var list))
+            {
+                _told[speaker] = list = new List<(BotEvent, DateTime)>();
+            }
+            list.Add((ev, now));
+            if (list.Count > 6)
+            {
+                list.RemoveAt(0);
+            }
+            if (_told.Count > 4000)
+            {
+                _told.Clear(); // a bounded scratchpad, not a record
+            }
+        }
+
+        public static string ComposeGossip(string speakerName, Point3D speakerLoc) =>
+            ComposeGossip(speakerName, speakerLoc, null);
+
+        public static string ComposeGossip(string speakerName, Point3D speakerLoc, PlayerBot speaker)
         {
             if (_templates.Count == 0 || _ring.Count == 0)
             {
@@ -307,7 +469,7 @@ namespace Server.CustomBots
             }
 
             var now = Core.Now;
-            List<(BotEvent ev, string key, double w)> pool = null;
+            List<(BotEvent ev, string key, double w, int dist)> pool = null;
             double totalW = 0;
             for (int i = _ring.Count - 1; i >= 0; i--)
             {
@@ -326,8 +488,6 @@ namespace Server.CustomBots
                     continue; // logins/logouts etc aren't gossip
                 }
 
-                // Own events go first-person; without _self templates for
-                // the type, the speaker just doesn't bring it up.
                 bool own = string.Equals(ev.Actor, speakerName,
                     StringComparison.OrdinalIgnoreCase);
                 var key = own ? ev.Type + "_self" : ev.Type;
@@ -335,31 +495,37 @@ namespace Server.CustomBots
                 {
                     continue;
                 }
+                if (ToldRecently(speakerName, ev, now))
+                {
+                    continue;
+                }
 
-                // Distance gate: someone ELSE's news has to physically reach
-                // the speaker. (Point3D.Zero = caller has no location —
-                // legacy/test paths — which skips the gate.)
+                int dist = 0;
                 if (!own && speakerLoc != Point3D.Zero)
                 {
-                    int dist = Math.Max(Math.Abs(ev.X - speakerLoc.X),
-                                        Math.Abs(ev.Y - speakerLoc.Y));
+                    dist = Math.Max(Math.Abs(ev.X - speakerLoc.X),
+                                    Math.Abs(ev.Y - speakerLoc.Y));
+
+                    // Word hasn't traveled this far yet.
                     if (age < TimeSpan.FromSeconds(60 + dist * NewsSecondsPerTile))
                     {
-                        continue; // word hasn't traveled this far yet
+                        continue;
+                    }
+
+                    // Not news here. You are looking at it.
+                    if (dist <= HereRadius && age < HereAge)
+                    {
+                        continue;
                     }
                 }
 
                 double w = baseW / (1.0 + ev.TellCount);
                 if (own)
                 {
-                    // People lead with their own stories — a bot that just
-                    // got murdered or slew a lich talks about THAT before
-                    // retelling someone else's news. (Still decays with
-                    // TellCount, so nobody loops their war story forever.)
-                    w *= 2.5;
+                    w *= 2.5; // people lead with their own stories
                 }
-                pool ??= new List<(BotEvent, string, double)>();
-                pool.Add((ev, key, w));
+                pool ??= new List<(BotEvent, string, double, int)>();
+                pool.Add((ev, key, w, dist));
                 totalW += w;
             }
 
@@ -368,29 +534,72 @@ namespace Server.CustomBots
                 return null;
             }
 
-            // Weighted pick by drama (freshness-decayed).
             double r = Utility.RandomDouble() * totalW;
-            var (picked, pickedKey, _) = pool[^1];
-            foreach (var (ev, key, w) in pool)
+            var (picked, pickedKey, _, pickedDist) = pool[^1];
+            foreach (var (ev, key, w, d) in pool)
             {
                 r -= w;
                 if (r <= 0)
                 {
                     picked = ev;
                     pickedKey = key;
+                    pickedDist = d;
                     break;
                 }
             }
 
-            // Only templates whose tokens this event can actually fill —
-            // an unattributed death (empty {other}) must not produce
-            // "got killed by  at the crossroads".
+            bool isOwn = pickedKey.EndsWith("_self", StringComparison.Ordinal);
+            var pickedAge = now - picked.At;
+
+            // A name that keeps coming up gets talked about as a name.
+            int repeat = 0;
+            if (!isOwn && picked.Type == "pk" && picked.Other.Length > 0)
+            {
+                repeat = CountByKiller(picked.Other, now);
+                if (repeat >= RepeatKillerAt && _templates.ContainsKey("pk_repeat"))
+                {
+                    pickedKey = "pk_repeat";
+                }
+            }
+
+            // How much of it the speaker actually knows.
+            int detail = isOwn ? 2
+                       : pickedDist <= VividRadius && pickedAge < VividAge ? 2
+                       : pickedDist <= VagueRadius || pickedAge < VividAge ? 1
+                       : 0;
+
+            string actor = picked.Actor;
+            string other = picked.Other;
+
+            // For a party, a war band or a convoy, {other} is WHERE they
+            // went, and it arrived here as the destination's handle —
+            // "Brit GY'" was said out loud. Same words a person would use.
+            if (picked.Type is "party" or "warband" or "convoy" or "party_self")
+            {
+                var dest = DestinationCatalog.GetByName(other);
+                if (dest != null)
+                {
+                    other = !string.IsNullOrEmpty(dest.Dungeon) ? dest.Dungeon : Humanize(dest);
+                }
+            }
+            if (detail < 2 && !isOwn && actor.Length > 0 && Utility.RandomDouble() < 0.6)
+            {
+                actor = Utility.RandomDouble() < 0.5 ? "someone" : "some poor sod";
+            }
+            if (detail == 0 && (picked.Type == "pk" || picked.Type == "red") && other.Length > 0)
+            {
+                other = Utility.RandomDouble() < 0.5 ? "a red" : "some red";
+            }
+
             var templates = _templates[pickedKey];
             List<string> usable = null;
             foreach (var t in templates)
             {
-                if (picked.Other.Length == 0 &&
-                    t.Contains("{other}", StringComparison.Ordinal))
+                if (other.Length == 0 && t.Contains("{other}", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (actor.Length == 0 && t.Contains("{actor}", StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -402,21 +611,196 @@ namespace Server.CustomBots
             }
 
             picked.TellCount++;
-            var line = usable[Utility.Random(usable.Count)];
+            NoteTold(speakerName, picked, now);
+            var line = Fill(usable[Utility.Random(usable.Count)],
+                            actor, other, picked.Place, pickedAge, repeat);
 
-            return line
-                .Replace("{actor}", picked.Actor, StringComparison.Ordinal)
-                .Replace("{other}", picked.Other, StringComparison.Ordinal)
-                .Replace("{place}", picked.Place, StringComparison.Ordinal)
-                .Replace("{when}", WhenPhrase(now - picked.At), StringComparison.Ordinal);
+            if (speaker != null)
+            {
+                // Said TO someone, some of the time. An announcement to the
+                // air is what made it read like a ticker.
+                var listener = NearbyListener(speaker, actor);
+                if (listener != null && Utility.RandomDouble() < 0.35)
+                {
+                    line = $"{FirstName(listener)}, {line}";
+                }
+
+                ScheduleReaction(speaker, picked, actor, other, listener);
+            }
+
+            return line;
         }
 
-        private static string WhenPhrase(TimeSpan age) => age switch
+        private static string Fill(string template, string actor, string other, string place,
+                                   TimeSpan age, int count)
         {
-            { TotalMinutes: < 10 } => "just now",
-            { TotalMinutes: < 45 } => "a few min ago",
-            { TotalHours: < 2 }    => "earlier",
-            _                      => "a while back",
-        };
+            var line = template
+                .Replace("{actor}", actor, StringComparison.Ordinal)
+                .Replace("{other}", other, StringComparison.Ordinal)
+                .Replace("{place}", place, StringComparison.Ordinal)
+                .Replace("{count}", count.ToString(), StringComparison.Ordinal)
+                .Replace("{when}", WhenPhrase(age), StringComparison.Ordinal);
+
+            // {when} is usually nothing; tidy the gap it leaves.
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\s{2,}", " ");
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\s+([,.?])", "$1");
+
+            // A place name can carry its own preposition ("near a dig
+            // site") or be a kind of ground rather than a spot ("the
+            // wilderness"), and the template already said "at". "at near a
+            // dig site" and "red near the wilderness" both went out.
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\b(at|in|to|by) near\b", "near");
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\b(at|near|by) the wilderness\b", "out in the wilds");
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\bto the wilderness\b", "out into the wilds");
+            line = line.Replace("the wilderness", "the wilds", StringComparison.Ordinal);
+            line = System.Text.RegularExpressions.Regex.Replace(line, @"\b(at|near|by) outside\b", "outside");
+
+            // Things happen IN a town, AT a shrine.
+            line = System.Text.RegularExpressions.Regex.Replace(line,
+                @"\bat (Britain|Vesper|Trinsic|Minoc|Yew|Moonglow|Magincia|Jhelom|Skara Brae|Nujel'm|Occlo|Serpent's Hold|Cove|Buccaneer's Den|Wind|Papua|Delucia)\b",
+                "in $1");
+            return line.Trim();
+        }
+
+        // A timestamp on every line is what a ticker does. People mostly
+        // leave it out, and say it loosely when they do.
+        private static string WhenPhrase(TimeSpan age)
+        {
+            double roll = Utility.RandomDouble();
+            return age switch
+            {
+                { TotalMinutes: < 10 } => roll < 0.5 ? "" : "just now",
+                { TotalMinutes: < 45 } => roll < 0.6 ? "" : roll < 0.8 ? "not long ago" : "a bit ago",
+                { TotalHours: < 2 }    => roll < 0.5 ? "" : "earlier",
+                _                      => roll < 0.4 ? "" : roll < 0.7 ? "earlier today" : "a while back",
+            };
+        }
+
+        private static int CountByKiller(string killer, DateTime now)
+        {
+            int n = 0;
+            for (int i = _ring.Count - 1; i >= 0; i--)
+            {
+                var ev = _ring[i];
+                if (now - ev.At > GossipMaxAge)
+                {
+                    break;
+                }
+                if (ev.Type == "pk" &&
+                    string.Equals(ev.Other, killer, StringComparison.OrdinalIgnoreCase))
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        private static string FirstName(Mobile m)
+        {
+            var name = m?.Name ?? "";
+            int sp = name.IndexOf(' ');
+            return (sp > 0 ? name[..sp] : name).ToLowerInvariant();
+        }
+
+        // Someone within talking distance who is not the speaker and not
+        // the person the story is about. Players count — the bots are
+        // talking to whoever is at the bank.
+        private static Mobile NearbyListener(PlayerBot speaker, string actorName)
+        {
+            if (speaker?.Map == null)
+            {
+                return null;
+            }
+            Mobile best = null;
+            int bestDist = int.MaxValue;
+            foreach (var m in speaker.Map.GetMobilesInRange(speaker.Location, 6))
+            {
+                if (m == speaker || m.Deleted || !m.Alive || m is not PlayerMobile)
+                {
+                    continue;
+                }
+                if (m is PlayerBot pb && pb.Combatant != null)
+                {
+                    continue;
+                }
+                if (string.Equals(m.Name, actorName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                int d = Math.Max(Math.Abs(m.X - speaker.X), Math.Abs(m.Y - speaker.Y));
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = m;
+                }
+            }
+            return best;
+        }
+
+        // Gossip is a two-way thing. A bystander answers a beat later —
+        // "again?", "which way did he go" — from react_<type>.txt, or the
+        // plain react.txt when the type has none. Nobody answers while
+        // fighting, and nobody answers their own story.
+        private static void ScheduleReaction(PlayerBot speaker, BotEvent ev,
+                                             string actor, string other, Mobile listener)
+        {
+            if (speaker?.Map == null || Utility.RandomDouble() > 0.55)
+            {
+                return;
+            }
+
+            var responder = listener as PlayerBot;
+            if (responder == null)
+            {
+                foreach (var m in speaker.Map.GetMobilesInRange(speaker.Location, 8))
+                {
+                    if (m is PlayerBot pb && pb != speaker && pb.Alive && pb.Combatant == null &&
+                        !string.Equals(pb.Name, actor, StringComparison.OrdinalIgnoreCase))
+                    {
+                        responder = pb;
+                        break;
+                    }
+                }
+            }
+            if (responder == null)
+            {
+                return;
+            }
+
+            var key = "react_" + ev.Type;
+            if (!_templates.TryGetValue(key, out var lines) &&
+                !_templates.TryGetValue("react", out lines))
+            {
+                return;
+            }
+
+            List<string> usable = null;
+            foreach (var t in lines)
+            {
+                if (other.Length == 0 && t.Contains("{other}", StringComparison.Ordinal)) continue;
+                if (actor.Length == 0 && t.Contains("{actor}", StringComparison.Ordinal)) continue;
+                (usable ??= new List<string>()).Add(t);
+            }
+            if (usable == null)
+            {
+                return;
+            }
+
+            var reply = Fill(usable[Utility.Random(usable.Count)],
+                             actor, other, ev.Place, Core.Now - ev.At, 0);
+            var delay = TimeSpan.FromSeconds(2.5 + Utility.RandomDouble() * 3.0);
+
+            Timer.DelayCall(delay, () =>
+            {
+                if (responder.Deleted || !responder.Alive || responder.Combatant != null ||
+                    responder.Map != speaker.Map ||
+                    !responder.InRange(speaker.Location, 12))
+                {
+                    return;
+                }
+                responder.Say(reply);
+            });
+        }
+
     }
 }

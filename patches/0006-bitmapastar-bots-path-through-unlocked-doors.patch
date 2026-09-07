@@ -1,5 +1,5 @@
 diff --git a/Projects/UOContent/Engines/Pathing/BitmapAStarAlgorithm.cs b/Projects/UOContent/Engines/Pathing/BitmapAStarAlgorithm.cs
-index 2c830db20..2f8487670 100644
+index 2c830db20..80e4ba089 100644
 --- a/Projects/UOContent/Engines/Pathing/BitmapAStarAlgorithm.cs
 +++ b/Projects/UOContent/Engines/Pathing/BitmapAStarAlgorithm.cs
 @@ -68,6 +68,7 @@ private struct PathNode
@@ -49,7 +49,32 @@ index 2c830db20..2f8487670 100644
          // Dead and spectral mobiles pass through doors too. Mirrors MovementImpl.
          _currentMobileIgnoreDoors |= !m.Alive || m.Body.BodyID == 0x3DB || m.IsDeadBondedPet;
          _currentMobileIgnoreSpellFields = m is PlayerMobile && map != Map.Felucca;
-@@ -285,6 +306,7 @@ public override Direction[] Find(Mobile m, Map map, Point3D start, Point3D goal)
+@@ -197,11 +218,19 @@ public override Direction[] Find(Mobile m, Map map, Point3D start, Point3D goal)
+ 
+             // MovementImpl reads these statics, so a slow-path fallthrough on any cell below needs
+             // them set for this mobile.
+-            if (bc != null)
+-            {
+-                MoveImpl.AlwaysIgnoreDoors = bc.CanOpenDoors;
+-                MoveImpl.IgnoreMovableImpassables = bc.CanMoveOverObstacles;
+-            }
++            //
++            // Driven from the resolved per-mobile fields, NOT from `bc`. The
++            // cache path below was taught about PlayerBots (see where
++            // _currentMobileIgnoreDoors is set) but this line was left gated
++            // on BaseCreature, so a bot kept its door-ignoring only for as
++            // long as the step cache could answer. A cache MISS falls through
++            // to GetSuccessorsSlowPath, which reads these statics — and with
++            // them unset every closed door went back to being a solid wall.
++            // Dungeon interiors are precisely where the cache misses, which
++            // is why bots still shuffled at dungeon doors after the cache
++            // path was fixed.
++            MoveImpl.AlwaysIgnoreDoors = _currentMobileIgnoreDoors;
++            MoveImpl.IgnoreMovableImpassables = _currentMobileIgnoreMovableImpassables;
+ 
+             MoveImpl.Goal = goal;
+ 
+@@ -285,6 +314,7 @@ public override Direction[] Find(Mobile m, Map map, Point3D start, Point3D goal)
                  _currentMobileCanSwim = false;
                  _currentMobileCantWalk = false;
                  _currentMobileIgnoreDoors = false;
@@ -57,7 +82,7 @@ index 2c830db20..2f8487670 100644
                  _currentMobileIgnoreSpellFields = false;
                  _currentMobileIgnoreMovableImpassables = false;
                  return dirs;
-@@ -297,6 +319,7 @@ public override Direction[] Find(Mobile m, Map map, Point3D start, Point3D goal)
+@@ -297,6 +327,7 @@ public override Direction[] Find(Mobile m, Map map, Point3D start, Point3D goal)
          _currentMobileCanSwim = false;
          _currentMobileCantWalk = false;
          _currentMobileIgnoreDoors = false;
@@ -65,7 +90,7 @@ index 2c830db20..2f8487670 100644
          _currentMobileIgnoreSpellFields = false;
          _currentMobileIgnoreMovableImpassables = false;
          return null;
-@@ -470,7 +493,13 @@ private bool IsBlockedByDynamic(Mobile m, Map map, int x, int y, int z)
+@@ -470,7 +501,13 @@ private bool IsBlockedByDynamic(Mobile m, Map map, int x, int y, int z)
              if (_currentMobileIgnoreDoors
                  && (itemData.Door
                      || itemId is 0x692 or 0x846 or 0x873

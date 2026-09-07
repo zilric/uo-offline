@@ -121,6 +121,23 @@ namespace Server.CustomBots
             Console.WriteLine(msg);
         }
 
+        // For the fleet-wide nav watchdog (BotNavWatch). A crawler that is
+        // lingering in a room, camping, mid-pad-transition or fighting is
+        // standing still on purpose and answers null; one that is riding a
+        // route hands over the hop it is walking to.
+        public override Point3D? NavGoal(PlayerBot bot)
+        {
+            if (_lingering || _transitionPending || bot.Combatant != null)
+            {
+                return null;
+            }
+            if (_route != null && _routeIndex < _route.Count)
+            {
+                return _route[_routeIndex];
+            }
+            return _targetPoint?.Location;
+        }
+
         private DateTime _runExpiresAt = DateTime.MinValue;
 
         // Exit-mode progress watchdog. If a whole ExitRescueAfter window
