@@ -1,0 +1,19 @@
+diff --git a/Projects/UOContent/Engines/Pathing/PathFollower.cs b/Projects/UOContent/Engines/Pathing/PathFollower.cs
+index 04aaf0148..ab9a846cd 100644
+--- a/Projects/UOContent/Engines/Pathing/PathFollower.cs
++++ b/Projects/UOContent/Engines/Pathing/PathFollower.cs
+@@ -83,6 +83,14 @@ public bool CheckPath()
+     public static bool Check(Point3D loc, Point3D goal, int range) =>
+         Utility.InRange(loc, goal, range) && (range > 1 || (loc.Z - goal.Z).Abs() < 16);
+ 
++    // Stub overload: upstream (Klein187/uo-offline) added bool-taking call
++    // sites (GhostBehavior.cs, AdventurerBehavior.cs) with no corresponding
++    // engine change anywhere in the reachable patch/commit history to give
++    // the bool real meaning. Pending the real upstream semantics, this is a
++    // pure pass-through to the existing single-arg Follow - callers behave
++    // exactly as they did before this overload existed, they just compile.
++    public bool Follow(bool hurry, int range) => Follow(range);
++
+     public bool Follow(int range)
+     {
+         var goal = GetGoalLocation();
