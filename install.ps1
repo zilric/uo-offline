@@ -14,31 +14,20 @@
 #      UO Second Age distribution. Reversible; $InstallT2AMap = $false to skip.
 #   5. Downloads Nerun's pre-T2A spawn map.
 #   6. Downloads the ClassicUO client (Windows build).
-#   7. Writes ModernUO + ClassicUO configs (T2A, localhost only unless hosting).
-#   8. Installs start/stop scripts and a Desktop shortcut.
+#   7. Writes ModernUO + ClassicUO configs (T2A, localhost only).
+#   8. Installs the launcher (which asks at every start: play by myself,
+#      host for friends, or join a friend - see docs/FRIENDS.md), the
+#      friends helper, and a Desktop shortcut.
 #
 # Run via install.bat (double-click — opens the GUI installer), or run this
 # console version directly in PowerShell:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
-# Playing with friends (see docs/FRIENDS.md):
-#   -Mode host                       your PC is the server; friends connect to it
-#   -Mode join -JoinAddress 100.x.y.z -User bob -Password secret
-#                                    client only: no server built, connects to a friend
-#   Both can be changed later with friends.bat in the install folder.
-#
 # -NoRun: define the paths + step functions but run nothing — the GUI
 # installer (install-gui.ps1) dot-sources this file as its engine and
 # invokes the steps itself.
 # =========================================================================
-param(
-  [switch]$NoRun,
-  [string]$InstallPath,
-  [ValidateSet("solo", "host", "join")][string]$Mode = "solo",
-  [string]$JoinAddress,
-  [string]$User,
-  [string]$Password
-)
+param([switch]$NoRun, [string]$InstallPath)
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
@@ -148,38 +137,6 @@ $OwnerUser     = "admin"
 $OwnerPass     = "admin"
 $ListenAddr    = "127.0.0.1:2593"
 $ShardName     = "UO Offline"
-
-# ---------------------------------------------------------------------------
-# How this install plays.
-#   solo  - server and client on this PC, localhost only (the default).
-#   host  - the same, but the server also listens on the network so friends
-#           can connect (LAN, or over Tailscale/ZeroTier, or a forwarded port).
-#   join  - client only. No server is built; the game connects to a friend's
-#           PC at $script:JoinAddress with the account name given.
-# The GUI sets these through Set-PlayMode; the console gets them from the
-# parameters above. friends.ps1 can change them after the install.
-# ---------------------------------------------------------------------------
-$script:PlayMode    = $Mode
-$script:JoinAddress = $JoinAddress
-$script:JoinPort    = 2593
-$script:LoginUser   = if ($User) { $User } else { $OwnerUser }
-$script:LoginPass   = if ($Password) { $Password } else { $OwnerPass }
-
-function Set-PlayMode {
-  param([string]$PlayMode, [string]$Address, [string]$LoginUser, [string]$LoginPass)
-  $script:PlayMode = if ($PlayMode) { $PlayMode } else { "solo" }
-  $script:JoinAddress = $Address
-  if ($LoginUser) { $script:LoginUser = $LoginUser }
-  if ($LoginPass) { $script:LoginPass = $LoginPass }
-  if ($script:PlayMode -eq "join" -and -not $script:JoinAddress) {
-    throw "Joining a friend needs their address (the one friends.bat shows on their PC)."
-  }
-}
-
-# The address the server binds. Hosting opens it to every network the PC is
-# on; the Windows firewall rule (OpenFirewallForFriends) is what actually
-# lets a friend through.
-function ListenAddress { if ($script:PlayMode -eq "host") { "0.0.0.0:2593" } else { $ListenAddr } }
 
 # ---------------------------------------------------------------------------
 # Pretty output
@@ -1000,7 +957,7 @@ function WriteModernUOConfig {
 {
   "assemblyDirectories": ["./Assemblies"],
   "dataDirectories": ["$uoData"],
-  "listeners": ["$(ListenAddress)"],
+  "listeners": ["$ListenAddr"],
   "settings": {
     "accountHandler.maxAccountsPerIP": "10",
     "autosave.enabled": "true",
@@ -1013,7 +970,7 @@ function WriteModernUOConfig {
   }
 }
 "@ | Set-Content (Join-Path $CfgDir "modernuo.json")
-  Ok "Wrote modernuo.json (listening on $(ListenAddress))"
+  Ok "Wrote modernuo.json"
 
   # The full schema, matching install.sh. An abbreviated file used to go
   # here, which left most flags to chance and set ContextMenus off while
@@ -1142,16 +1099,14 @@ function WriteClassicUOSettings {
   }
 
   # save_password + auto_login: clicking the desktop shortcut goes straight
-  # into the shard (the first login auto-creates the account). Joining a
-  # friend points the client at their PC instead of this one.
-  $ip = if ($script:PlayMode -eq "join") { $script:JoinAddress } else { "127.0.0.1" }
+  # into the shard (the first login auto-creates the admin account).
   foreach ($t in $targets) {
     @"
 {
-  "username": "$($script:LoginUser)",
-  "password": "$($script:LoginPass)",
-  "ip": "$ip",
-  "port": $($script:JoinPort),
+  "username": "$OwnerUser",
+  "password": "$OwnerPass",
+  "ip": "127.0.0.1",
+  "port": 2593,
   "ultimaonlinedirectory": "$uoData",
   "clientversion": "$UODataVersion",
   "lastservernum": 1,
@@ -1166,40 +1121,6 @@ function WriteClassicUOSettings {
     Ok "Wrote $t\settings.json"
   }
   if ($plugins -ne "[]") { Ok "Razor wired in as a ClassicUO plugin." }
-  if ($script:PlayMode -eq "join") { Ok "The game will connect to $ip as $($script:LoginUser)." }
-}
-
-# ---------------------------------------------------------------------------
-# Step 10b — the Windows firewall, when hosting.
-#
-# Binding 0.0.0.0 is not enough on Windows: the firewall drops inbound
-# connections to a program it has no rule for. Adding a rule needs admin,
-# so this asks once through the normal UAC prompt. Declining is allowed -
-# friends on the same PC's Tailscale network may still get through if the
-# firewall is off for that interface, and friends.bat can retry it later.
-# ---------------------------------------------------------------------------
-$FirewallRuleName = "UO Offline (friends)"
-
-function FirewallRuleExists {
-  try {
-    $out = & netsh advfirewall firewall show rule name="$FirewallRuleName" 2>&1
-    return ($LASTEXITCODE -eq 0 -and ($out -join "`n") -match "Rule Name")
-  } catch { return $false }
-}
-
-function OpenFirewallForFriends {
-  if ($script:PlayMode -ne "host") { return }
-  Banner "Opening the Windows firewall for friends (port 2593)"
-  if (FirewallRuleExists) { Ok "Firewall rule already present."; return }
-  $args = "advfirewall firewall add rule name=`"$FirewallRuleName`" dir=in action=allow protocol=TCP localport=2593"
-  try {
-    $p = Start-Process -FilePath "netsh" -ArgumentList $args -Verb RunAs -Wait -PassThru -WindowStyle Hidden
-    if ($p.ExitCode -eq 0 -or (FirewallRuleExists)) { Ok "Firewall rule added: $FirewallRuleName"; return }
-    Warn "netsh returned $($p.ExitCode); the rule may not have been added."
-  } catch {
-    Warn "The firewall prompt was declined or failed: $($_.Exception.Message)"
-  }
-  Warn "Friends may not be able to connect until the rule exists. Run friends.bat and choose 'firewall' to try again."
 }
 
 # ---------------------------------------------------------------------------
@@ -1387,164 +1308,37 @@ function InstallRuntimeScripts {
   $binPath = Join-Path $InstallRoot ".classicuo-bin-path"
   if (Test-Path $binPath) { $cuoBin = Get-Content $binPath }
 
+  # The launcher lives in the repo as scripts\start.ps1 and only needs to
+  # know where things are. It asks at every start how you want to play
+  # (solo, host for friends, join a friend) - see the file for the flow.
   $startPs1 = Join-Path $InstallRoot "start.ps1"
-  @"
-# One-click play: start the ModernUO server (minimized) unless one is
-# already running, wait until it's actually listening on 2593, THEN launch
-# ClassicUO — which loads Razor as its plugin (see settings.json) and
-# auto-logs into the shard. Polling the port avoids the race where the
-# client connects before the server has finished its (slow) first boot.
-`$dist = "$DistDir"
-`$dotnet = "$DotnetRoot\dotnet.exe"
-`$serverLog = "$InstallRoot\server.log"
-
-# How this install plays: solo, host, or join. Written by the installer and
-# changed by friends.bat, so the launcher reads it fresh every time.
-`$play = @{ mode = "solo"; address = "127.0.0.1"; port = 2593 }
-`$playFile = Join-Path `$PSScriptRoot "play.json"
-if (Test-Path `$playFile) {
-  try {
-    `$j = Get-Content `$playFile -Raw | ConvertFrom-Json
-    if (`$j.mode)    { `$play.mode    = [string]`$j.mode }
-    if (`$j.address) { `$play.address = [string]`$j.address }
-    if (`$j.port)    { `$play.port    = [int]`$j.port }
-  } catch { }
-}
-
-# Ask GitHub whether there is a newer UO Offline before starting anything.
-# The checker stays silent unless there is genuinely something new, and any
-# failure at all - no internet, GitHub down, rate limited - falls straight
-# through to launching the game.
-`$verdict = "continue"
-`$updater = Join-Path `$PSScriptRoot "update-check.ps1"
-if (Test-Path `$updater) {
-  try { `$verdict = (& `$updater | Select-Object -Last 1) } catch { `$verdict = "continue" }
-}
-if (`$verdict -eq "updating") { return }
-
-function PortOpen {
-  param([string]`$Address = "127.0.0.1", [int]`$Port = 2593, [int]`$TimeoutMs = 1500)
-  try {
-    `$c = New-Object System.Net.Sockets.TcpClient
-    `$ar = `$c.BeginConnect(`$Address, `$Port, `$null, `$null)
-    if (-not `$ar.AsyncWaitHandle.WaitOne(`$TimeoutMs)) { `$c.Close(); return `$false }
-    `$c.EndConnect(`$ar); `$c.Close(); return `$true
-  } catch { return `$false }
-}
-
-# The shortcut runs this minimized, so Write-Host is invisible to the player.
-# Anything they actually need to see goes in a message box.
-Add-Type -AssemblyName System.Windows.Forms
-
-# Joining a friend: there is no server here to start. Check that theirs is
-# reachable, then open the game against it.
-if (`$play.mode -eq "join") {
-  if (-not (PortOpen `$play.address `$play.port 4000)) {
-    [System.Windows.Forms.MessageBox]::Show(
-      "Could not reach your friend's game at `$(`$play.address):`$(`$play.port)." + [Environment]::NewLine + [Environment]::NewLine +
-      "Check that:" + [Environment]::NewLine +
-      "  - their UO Offline is running (the server starts when they click Play)" + [Environment]::NewLine +
-      "  - they are set up to host (friends.bat on their PC shows the address)" + [Environment]::NewLine +
-      "  - the address is right, and if you use Tailscale, that it is on" + [Environment]::NewLine + [Environment]::NewLine +
-      "To change the address or your login, run friends.bat in the install folder.",
-      "UO Offline - friend not reachable") | Out-Null
-    return
-  }
-  `$cuo = "$cuoBin"
-  if (`$cuo -and (Test-Path `$cuo)) { Start-Process -FilePath `$cuo -WorkingDirectory (Split-Path -Parent `$cuo) }
-  else { Write-Host "ClassicUO.exe not found; start it manually." }
-  return
-}
-
-# First launch has no accounts yet, and ModernUO asks on the console whether
-# to create the owner account. That question cannot be answered through a
-# redirected stdin - the server treats redirected input as headless and
-# refuses to read it - so the only way is for you to answer it. Show a normal
-# window the first time instead of the usual minimized one.
-`$firstRun = -not (Test-Path (Join-Path `$dist "Saves\Accounts\Accounts.bin"))
-
-if (PortOpen) {
-  Write-Host "Server already running - launching the game."
-} else {
-  if (`$firstRun) {
-    [System.Windows.Forms.MessageBox]::Show(
-      "First launch. A server window is about to open and ask you two things:" + [Environment]::NewLine + [Environment]::NewLine +
-      "  1. Create the owner account now?  Answer  y" + [Environment]::NewLine +
-      "  2. A username and password.  admin / admin is fine - it is your own machine." + [Environment]::NewLine + [Environment]::NewLine +
-      "Then it builds the world and bakes the pathfinding cache the bots use." + [Environment]::NewLine +
-      "That part is a one-off and takes a few minutes. Later starts are quick." + [Environment]::NewLine + [Environment]::NewLine +
-      "The game starts by itself once the server has finished loading.",
-      "UO Offline - first launch") | Out-Null
-
-    # Visible on purpose: those questions cannot be answered any other way.
-    Start-Process -FilePath `$dotnet -ArgumentList "ModernUO.dll" -WorkingDirectory `$dist | Out-Null
-  } else {
-    # Output goes to a log, not to a console window.
-    #
-    # Handed a raw console, the server stalls before it ever binds the port -
-    # measured here at 0.6 CPU seconds and still dead after three minutes,
-    # against 9 seconds and 14.8 CPU seconds with its output redirected. The
-    # client then opens against a port nothing is listening on and the player
-    # gets "No connection could be made because the target machine actively
-    # refused it", which explains nothing.
-    #
-    # A log file is also just better: when something does go wrong there is
-    # something to read, instead of a console window hidden behind the game.
-    Start-Process -FilePath `$dotnet -ArgumentList "ModernUO.dll" -WorkingDirectory `$dist ``
-      -WindowStyle Minimized -RedirectStandardOutput `$serverLog | Out-Null
-  }
-
-  # First launch builds the world from scratch, which takes far longer than a
-  # normal boot, so do not hold both to the same clock.
-  `$limit = if (`$firstRun) { 1200 } else { 180 }
-  Write-Host "Starting server, waiting up to `$limit s for it to listen on 2593..."
-
-  `$ready = `$false
-  for (`$i = 0; `$i -lt `$limit; `$i++) {
-    if (PortOpen) { `$ready = `$true; break }
-    Start-Sleep -Seconds 1
-  }
-
-  if (-not `$ready) {
-    # Starting the client now would only produce "No connection could be made
-    # because the target machine actively refused it", which tells the player
-    # nothing about what went wrong. Say it plainly instead.
-    [System.Windows.Forms.MessageBox]::Show(
-      "The server did not start listening within `$limit seconds, so the game has not been launched - it would only fail to connect." + [Environment]::NewLine + [Environment]::NewLine +
-      "What went wrong should be at the end of:" + [Environment]::NewLine + "`$serverLog" + [Environment]::NewLine + [Environment]::NewLine +
-      "If it is still loading on a slow machine, waiting a moment and clicking UO Offline again will connect to it.",
-      "UO Offline - server did not start") | Out-Null
-    return
-  }
-}
-
-`$cuo = "$cuoBin"
-if (`$cuo -and (Test-Path `$cuo)) { Start-Process -FilePath `$cuo -WorkingDirectory (Split-Path -Parent `$cuo) }
-else { Write-Host "ClassicUO.exe not found; start it manually." }
-"@ | Set-Content $startPs1
+  $tpl = Join-Path $ScriptDir "scripts\start.ps1"
+  if (-not (Test-Path $tpl)) { Die "scripts\start.ps1 is missing next to the installer. Re-download the UO Offline zip." }
+  $launcher = Get-Content $tpl -Raw
+  $launcher = $launcher.Replace("__ROOT__", $InstallRoot).Replace("__DIST__", $DistDir).Replace("__DOTNET__", "$DotnetRoot\dotnet.exe").Replace("__CUO__", $cuoBin)
+  Set-Content $startPs1 $launcher
   Ok "Wrote start.ps1"
 
-  # start.bat — double-clickable launcher that bypasses the execution policy
-  # (running start.ps1 directly is blocked by default on Windows).
-  @"
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
-"@ | Set-Content (Join-Path $InstallRoot "start.bat")
-  Ok "Wrote start.bat"
-
-  # play.json — what the launcher does when clicked. friends.ps1 rewrites it.
-  $addr = if ($script:PlayMode -eq "join") { $script:JoinAddress } else { "127.0.0.1" }
-  @"
+  # play.json - the launcher's memory: last choice, whether to keep asking,
+  # the friend's address, and the owner login it restores for solo/host.
+  $playJson = Join-Path $InstallRoot "play.json"
+  if (-not (Test-Path $playJson)) {
+    @"
 {
-  "mode": "$($script:PlayMode)",
-  "address": "$addr",
-  "port": $($script:JoinPort)
+  "mode": "solo",
+  "remember": false,
+  "address": "",
+  "user": "",
+  "port": 2593,
+  "owner_user": "$OwnerUser",
+  "owner_pass": "$OwnerPass"
 }
-"@ | Set-Content (Join-Path $InstallRoot "play.json")
-  Ok "Wrote play.json (mode: $($script:PlayMode))"
+"@ | Set-Content $playJson
+    Ok "Wrote play.json"
+  }
 
-  # friends.ps1 — shows the address to give friends, and switches this
-  # install between playing alone, hosting, and joining.
+  # friends.ps1 - the address to give friends, the firewall rule, and the
+  # ask/default switches for the launcher's question.
   $friendsSrc = Join-Path $ScriptDir "scripts\friends.ps1"
   if (Test-Path $friendsSrc) {
     Copy-Item $friendsSrc (Join-Path $InstallRoot "friends.ps1") -Force
@@ -1556,6 +1350,14 @@ pause
 "@ | Set-Content (Join-Path $InstallRoot "friends.bat")
     Ok "Wrote friends.ps1 + friends.bat"
   }
+
+  # start.bat — double-clickable launcher that bypasses the execution policy
+  # (running start.ps1 directly is blocked by default on Windows).
+  @"
+@echo off
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+"@ | Set-Content (Join-Path $InstallRoot "start.bat")
+  Ok "Wrote start.bat"
 
   # The launcher's update checker, and the version stamp it compares against.
   $updSrc = Join-Path $ScriptDir "scripts\update-check.ps1"
@@ -1581,17 +1383,6 @@ pause
   $lnk.IconLocation = $iconSpec
   $lnk.Save()
   Ok "Desktop shortcut: UO Offline"
-
-  # Hosting: a second shortcut that shows the address to give friends.
-  if ($script:PlayMode -eq "host" -and (Test-Path (Join-Path $InstallRoot "friends.ps1"))) {
-    $lnk2 = $wsh.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "UO Offline Friends.lnk"))
-    $lnk2.TargetPath = "powershell.exe"
-    $lnk2.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallRoot 'friends.ps1')`" status -Gui"
-    $lnk2.WorkingDirectory = $InstallRoot
-    $lnk2.IconLocation = $iconSpec
-    $lnk2.Save()
-    Ok "Desktop shortcut: UO Offline Friends"
-  }
 }
 
 # ---------------------------------------------------------------------------
@@ -1604,8 +1395,11 @@ Server:         $DistDir
 Client:         $ClassicUODir
 Razor:          $RazorDir  (loads inside ClassicUO as a plugin)
 UO data:        $($script:UOData)
-Play mode:      $($script:PlayMode)$(if ($script:PlayMode -eq "join") { "  (connects to $($script:JoinAddress):$($script:JoinPort))" } elseif ($script:PlayMode -eq "host") { "  (friends can connect; friends.bat shows the address)" } else { "  (localhost only, offline)" })
-Login:          $($script:LoginUser) / $($script:LoginPass)
+Listener:       $ListenAddr  (localhost only until you choose to host)
+Owner login:    $OwnerUser / $OwnerPass
+Friends:        the launcher asks at every start - play by myself, host for
+                friends, or join a friend. friends.bat shows the address to
+                give out. See docs\FRIENDS.md.
 
 To play:        Double-click the "UO Offline" desktop shortcut — it starts
                 the server, then opens the game with Razor attached and
@@ -1623,39 +1417,28 @@ $InstallRoot\POPULATE-WORLD.txt (same as the Linux version).
 # file with -NoRun and drives these same steps itself, one checklist row per
 # entry, so console and GUI installs can never drift apart.
 # ---------------------------------------------------------------------------
-# Server = only when this PC runs the server (solo and host). A join install
-# is client only and skips them. Host = only when hosting.
 $script:InstallSteps = @(
   @{ Name = "Check requirements";           Run = { Preflight } },
-  @{ Name = "Install git (no admin)";      Run = { BootstrapGit };      Server = $true },
+  @{ Name = "Install git (no admin)";      Run = { BootstrapGit } },
   @{ Name = "Install .NET (no admin)";      Run = { BootstrapDotnet } },
-  @{ Name = "Download the ModernUO server"; Run = { FetchModernUO };     Server = $true },
-  @{ Name = "Patch the engine";            Run = { ApplyEnginePatches }; Server = $true },
-  @{ Name = "Add the PlayerBots";           Run = { InstallPlayerBots }; Server = $true },
-  @{ Name = "Build the server";             Run = { BuildModernUO };     Server = $true },
-  @{ Name = "Set Felucca to summer";        Run = { FixFeluccaSeason };  Server = $true },
+  @{ Name = "Download the ModernUO server"; Run = { FetchModernUO } },
+  @{ Name = "Patch the engine";            Run = { ApplyEnginePatches } },
+  @{ Name = "Add the PlayerBots";           Run = { InstallPlayerBots } },
+  @{ Name = "Build the server";             Run = { BuildModernUO } },
+  @{ Name = "Set Felucca to summer";        Run = { FixFeluccaSeason } },
   @{ Name = "Get the UO game data";         Run = { FindOrDownloadUOData } },
   @{ Name = "Install T2A-era map art";      Run = { SwapT2AMap } },
-  @{ Name = "Fetch the monster spawns";     Run = { FetchSpawnMap };     Server = $true },
+  @{ Name = "Fetch the monster spawns";     Run = { FetchSpawnMap } },
   @{ Name = "Download ClassicUO client";    Run = { InstallClassicUO } },
   @{ Name = "Download Razor assistant";     Run = { InstallRazor } },
-  @{ Name = "Write the configuration";      Run = { if ($script:PlayMode -ne "join") { WriteModernUOConfig }; WriteClassicUOSettings } },
-  @{ Name = "Install the map editor";       Run = { InstallMapEditor };  Server = $true },
-  @{ Name = "Open the firewall for friends"; Run = { OpenFirewallForFriends }; HostOnly = $true },
+  @{ Name = "Write the configuration";      Run = { WriteModernUOConfig; WriteClassicUOSettings } },
+  @{ Name = "Install the map editor";       Run = { InstallMapEditor } },
   @{ Name = "Create launcher + shortcut";   Run = { InstallRuntimeScripts } }
 )
 
-# The steps that apply to the chosen play mode, in order.
-function Get-InstallSteps {
-  $script:InstallSteps | Where-Object {
-    (-not $_.Server -or $script:PlayMode -ne "join") -and
-    (-not $_.HostOnly -or $script:PlayMode -eq "host")
-  }
-}
-
 if (-not $NoRun) {
   try {
-    foreach ($step in (Get-InstallSteps)) { & $step.Run }
+    foreach ($step in $script:InstallSteps) { & $step.Run }
     Finish
   } catch {
     Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red

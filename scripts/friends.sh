@@ -1,41 +1,44 @@
 #!/usr/bin/env bash
 # =========================================================================
-# friends.sh — play UO Offline with friends (Linux / Steam Deck).
+# friends.sh — playing UO Offline with friends (Linux / Steam Deck): the
+# address to give out and the "how do you want to play" question.
 #
-# Lives in the install folder (install.sh copies it there).
+# Lives in the install folder (install.sh copies it there). The question
+# itself is asked by start.sh every time: play by myself, host for
+# friends, or join a friend. This script is for the bits around it.
 #
-#   ./friends.sh                    what this install is set to, and the
-#                                   address to give friends when hosting
-#   ./friends.sh host               let friends connect to this PC
-#   ./friends.sh solo               back to this PC only
-#   ./friends.sh join ADDRESS [NAME] [PASSWORD]
-#                                   connect to a friend's PC instead of
-#                                   running a server here
+#   ./friends.sh                what this install is set to; when hosting,
+#                               the address to give friends
+#   ./friends.sh ask            ask the question at every start again
+#   ./friends.sh default MODE   stop asking and always use solo, host or join
 #
-# Hosting binds the server to every network this PC is on. Friends on the
-# same LAN use the LAN address; friends elsewhere use Tailscale (or
-# ZeroTier). If a firewall is on (ufw, firewalld), open TCP 2593 yourself:
-#   sudo ufw allow 2593/tcp        or      sudo firewall-cmd --add-port=2593/tcp --permanent
+# Hosting binds the server to every network this PC is on. If a firewall
+# is on (ufw, firewalld), open TCP 2593 yourself:
+#   sudo ufw allow 2593/tcp     or   sudo firewall-cmd --add-port=2593/tcp --permanent
 # See docs/FRIENDS.md in the UO Offline download.
-#
-# Changes to the server (host/solo) take effect the next time it starts.
 # =========================================================================
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAY_FILE="${ROOT}/play.json"
 CFG_FILE="${ROOT}/ModernUO/Distribution/Configuration/modernuo.json"
+MODE_FILE="${ROOT}/server-mode.txt"
 PORT=2593
 
+json_str() { grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$1" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' || true; }
+json_raw() { grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[a-z0-9]+" "$1" 2>/dev/null | sed -E 's/.*:[[:space:]]*//' || true; }
+
 read_play() {
-  PLAY_MODE="solo"; PLAY_ADDRESS="127.0.0.1"; PLAY_PORT="${PORT}"
+  PLAY_MODE="solo"; PLAY_REMEMBER="false"; PLAY_ADDRESS=""; PLAY_USER=""; PLAY_PORT="${PORT}"
+  OWNER_USER="admin"; OWNER_PASS="admin"
   if [[ -f "${PLAY_FILE}" ]]; then
-    local m a p
-    m="$(grep -oE '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' "${PLAY_FILE}" | sed -E 's/.*"([^"]*)"$/\1/' || true)"
-    a="$(grep -oE '"address"[[:space:]]*:[[:space:]]*"[^"]*"' "${PLAY_FILE}" | sed -E 's/.*"([^"]*)"$/\1/' || true)"
-    p="$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "${PLAY_FILE}" | grep -oE '[0-9]+$' || true)"
-    [[ -n "$m" ]] && PLAY_MODE="$m"
-    [[ -n "$a" ]] && PLAY_ADDRESS="$a"
-    [[ -n "$p" ]] && PLAY_PORT="$p"
+    local v
+    v="$(json_str "${PLAY_FILE}" mode)";       [[ -n "$v" ]] && PLAY_MODE="$v"
+    v="$(json_raw "${PLAY_FILE}" remember)";   [[ -n "$v" ]] && PLAY_REMEMBER="$v"
+    v="$(json_str "${PLAY_FILE}" address)";    [[ -n "$v" ]] && PLAY_ADDRESS="$v"
+    v="$(json_str "${PLAY_FILE}" user)";       [[ -n "$v" ]] && PLAY_USER="$v"
+    v="$(json_raw "${PLAY_FILE}" port)";       [[ -n "$v" ]] && PLAY_PORT="$v"
+    v="$(json_str "${PLAY_FILE}" owner_user)"; [[ -n "$v" ]] && OWNER_USER="$v"
+    v="$(json_str "${PLAY_FILE}" owner_pass)"; [[ -n "$v" ]] && OWNER_PASS="$v"
   fi
 }
 
@@ -43,17 +46,14 @@ write_play() {
   cat > "${PLAY_FILE}" <<EOF
 {
   "mode": "${PLAY_MODE}",
+  "remember": ${PLAY_REMEMBER},
   "address": "${PLAY_ADDRESS}",
-  "port": ${PLAY_PORT}
+  "user": "${PLAY_USER}",
+  "port": ${PLAY_PORT},
+  "owner_user": "${OWNER_USER}",
+  "owner_pass": "${OWNER_PASS}"
 }
 EOF
-}
-
-set_listener() {
-  [[ -f "${CFG_FILE}" ]] || return 1
-  sed -i -E "s/\"listeners\"[[:space:]]*:[[:space:]]*\[[^]]*\]/\"listeners\": [\"$1\"]/" "${CFG_FILE}"
-  sed -i -E 's/"serverListing\.autoDetect"[[:space:]]*:[[:space:]]*"[^"]*"/"serverListing.autoDetect": "false"/' "${CFG_FILE}"
-  return 0
 }
 
 current_listener() {
@@ -61,31 +61,9 @@ current_listener() {
   grep -oE '"listeners"[[:space:]]*:[[:space:]]*\[[[:space:]]*"[^"]*"' "${CFG_FILE}" | sed -E 's/.*"([^"]*)"$/\1/'
 }
 
-client_settings_files() {
-  local f
-  for f in "${ROOT}/ClassicUO/settings.json" "${ROOT}"/ClassicUO/*/settings.json; do
-    [[ -f "$f" ]] && echo "$f"
-  done
-}
-
-set_client() {
-  local ip="$1" user="${2:-}" pass="${3:-}" n=0 f
-  while IFS= read -r f; do
-    [[ -n "$f" ]] || continue
-    sed -i -E "s/\"ip\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"ip\": \"${ip}\"/" "$f"
-    [[ -n "$user" ]] && sed -i -E "s/\"username\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"username\": \"${user}\"/" "$f"
-    [[ -n "$pass" ]] && sed -i -E "s/\"password\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"password\": \"${pass}\"/" "$f"
-    n=$((n + 1))
-  done < <(client_settings_files)
-  echo "$n"
-}
-
-server_up() {
-  (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null
-}
+server_up() { (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; }
 
 addresses() {
-  # ip(8) everywhere modern; hostname -I as a fallback.
   if command -v ip >/dev/null 2>&1; then
     ip -4 -o addr show scope global 2>/dev/null | awk '{print $4 "  (" $2 ")"}' | sed 's#/[0-9]*##'
   else
@@ -97,75 +75,52 @@ status() {
   read_play
   echo "UO Offline - playing with friends"
   echo
-  case "${PLAY_MODE}" in
-    join)
-      echo "This install JOINS a friend's game at ${PLAY_ADDRESS}:${PLAY_PORT}."
-      echo "No server runs here. start.sh connects there if their game is up."
-      echo
-      echo "To change the address or your login:  ./friends.sh join ADDRESS NAME PASSWORD"
-      echo "To run your own world instead:         ./friends.sh solo"
-      ;;
-    host)
-      echo "This PC HOSTS. The server listens on $(current_listener) and friends can connect."
-      if server_up; then echo "Server running now: yes"; else echo "Server running now: no - run start.sh"; fi
-      echo
-      echo "Give friends ONE of these addresses (port ${PORT}):"
-      local any=0 line
-      while IFS= read -r line; do
-        [[ -n "$line" ]] || continue
-        any=1
-        case "$line" in
-          100.*|*tailscale*|*zt*) echo "  From anywhere (Tailscale / ZeroTier):  $line" ;;
-          *)                      echo "  Same house / LAN:                      $line" ;;
-        esac
-      done < <(addresses)
-      [[ $any -eq 0 ]] && echo "  (no network address found)"
-      echo
-      echo "For friends who are not on your LAN, install Tailscale (tailscale.com) on both"
-      echo "PCs and use the 100.x.y.z address it gives this one. No router changes needed."
-      echo "If a firewall is on here, open TCP ${PORT} (see the top of this script)."
-      echo
-      echo "Your friends install UO Offline with --join ADDRESS, or run ./friends.sh join ADDRESS."
-      echo "To stop hosting: ./friends.sh solo"
-      ;;
-    *)
-      echo "This install plays by itself: the server is on this PC only (127.0.0.1)."
-      echo
-      echo "To let friends in:   ./friends.sh host"
-      echo "To join a friend:    ./friends.sh join ADDRESS NAME PASSWORD"
-      ;;
-  esac
+  if [[ "${PLAY_REMEMBER}" == "true" ]]; then
+    echo "start.sh always uses '${PLAY_MODE}' without asking (./friends.sh ask changes that)."
+  else
+    echo "start.sh asks how you want to play each time. Last choice: ${PLAY_MODE}."
+  fi
+  [[ "${PLAY_MODE}" == "join" && -n "${PLAY_ADDRESS}" ]] && echo "Joining: ${PLAY_ADDRESS} as ${PLAY_USER}"
+  echo
+  if server_up; then
+    local m="solo"; [[ -f "${MODE_FILE}" ]] && m="$(tr -d '[:space:]' < "${MODE_FILE}")"
+    echo "Server running now: yes, started for '${m}'"
+  else
+    echo "Server running now: no"
+  fi
+  echo "Server listener:    $(current_listener)"
+  echo
+  echo "When you host, give friends ONE of these (port ${PORT}):"
+  local any=0 line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    any=1
+    case "$line" in
+      100.*|*tailscale*|*zt*) echo "  From anywhere (Tailscale / ZeroTier):  $line" ;;
+      *)                      echo "  Same house / LAN:                      $line" ;;
+    esac
+  done < <(addresses)
+  [[ $any -eq 0 ]] && echo "  (no network address found)"
+  echo
+  echo "For friends who are not on your LAN, install Tailscale (tailscale.com) on both"
+  echo "PCs and use the 100.x.y.z address it gives this one. No router changes needed."
+  echo "If a firewall is on here, open TCP ${PORT} (see the top of this script)."
+  echo
+  echo "Friends pick 'Join a friend' when they start UO Offline and type the address."
 }
 
 case "${1:-status}" in
-  host)
-    read_play; PLAY_MODE="host"; PLAY_ADDRESS="127.0.0.1"; write_play
-    if set_listener "0.0.0.0:${PORT}"; then
-      echo "Hosting is ON. The server will listen for friends the next time it starts."
-      server_up && echo "The server is running right now on the old setting; run stop.sh, then start.sh."
-    else
-      echo "No server was found in this install (a join-only install?). Re-run install.sh without --join to build one."
-    fi
-    set_client "127.0.0.1" >/dev/null
-    echo; status
+  ask)
+    read_play; PLAY_REMEMBER="false"; write_play
+    echo "start.sh will ask how you want to play at every start."; echo; status
     ;;
-  solo)
-    read_play; PLAY_MODE="solo"; PLAY_ADDRESS="127.0.0.1"; write_play
-    set_listener "127.0.0.1:${PORT}" >/dev/null 2>&1 || true
-    set_client "127.0.0.1" >/dev/null
-    echo "Back to playing by yourself. The server listens on this PC only from its next start."
-    echo; status
+  default)
+    m="${2:-}"
+    case "$m" in solo|host|join) ;; *) echo "Usage: ./friends.sh default solo|host|join"; exit 1 ;; esac
+    read_play; PLAY_MODE="$m"; PLAY_REMEMBER="true"; write_play
+    echo "start.sh will always use '${m}' without asking. ./friends.sh ask brings the question back."; echo; status
     ;;
-  join)
-    addr="${2:-}"; user="${3:-}"; pass="${4:-}"
-    if [[ -z "$addr" ]]; then echo "Usage: ./friends.sh join ADDRESS [NAME] [PASSWORD]"; exit 1; fi
-    read_play; PLAY_MODE="join"; PLAY_ADDRESS="$addr"; PLAY_PORT="${PORT}"; write_play
-    n="$(set_client "$addr" "$user" "$pass")"
-    echo "Set to join ${addr} as ${user:-the saved login}. ${n} client settings file(s) updated."
-    [[ "$n" == "0" ]] && echo "No ClassicUO settings.json was found; run install.sh once so the client exists."
-    echo; status
-    ;;
-  status|*)
+  *)
     status
     ;;
 esac

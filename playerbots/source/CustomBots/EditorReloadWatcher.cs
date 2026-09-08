@@ -102,6 +102,10 @@ namespace Server.CustomBots
         // guild chat.
         private static readonly string GuildReq = Live("guild_request.txt");
         private static readonly string GuildAck = Live("guild_ack.json");
+        // shutdown_request.txt: "token" — the launcher asks the server to
+        // save the world and stop, so it can be restarted with a different
+        // listener (solo <-> hosting for friends) without losing anything.
+        private static readonly string ShutdownReq = Live("shutdown_request.txt");
         // bank_request.txt: "token" — does a bot saying "withdraw 5000" at a
         // bank actually move 5000 gold?
         private static readonly string BankReq = Live("bank_request.txt");
@@ -134,6 +138,7 @@ namespace Server.CustomBots
         private static long _lastGray = -1;
         private static long _lastThief = -1;
         private static long _lastGuild = -1;
+        private static long _lastShutdown = -1;
         private static long _lastBank = -1;
         private static Timer _timer;
 
@@ -168,6 +173,7 @@ namespace Server.CustomBots
             _lastGray = ReadLingerRequest(GrayReq, out _) ?? 0;
             _lastThief = ReadThiefRequest(out _, out _) ?? 0;
             _lastGuild = ReadCountRequest(GuildReq, out _, out _, 0) ?? 0;
+            _lastShutdown = ReadToken(ShutdownReq) ?? 0;
             _lastBank = ReadLingerRequest(BankReq, out _) ?? 0;
             _timer = Timer.DelayCall(Interval, Interval, Poll);
         }
@@ -375,6 +381,15 @@ namespace Server.CustomBots
             {
                 _lastGuild = guildTok.Value;
                 DoGuildTest(guildTok.Value, guildLinger, guildKeep != 0);
+            }
+
+            var downTok = ReadToken(ShutdownReq);
+            if (downTok != null && downTok.Value != _lastShutdown)
+            {
+                _lastShutdown = downTok.Value;
+                Console.WriteLine("[EditorReload] shutdown requested by the launcher — saving the world and stopping");
+                try { World.Save(); } catch (Exception ex) { Console.WriteLine($"[EditorReload] save before shutdown failed: {ex.Message}"); }
+                Core.Kill();
             }
 
             var bankTok = ReadLingerRequest(BankReq, out var bankLinger);

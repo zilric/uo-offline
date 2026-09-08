@@ -2,46 +2,38 @@
 
 UO Offline is a real server under the hood, so friends can play in your world. Your PC runs the world, their PCs run the game client and connect to yours. Their characters live in your save.
 
+Every time you click **UO Offline** it asks how you want to play:
+
+- **Play by myself.** Server and game on this PC. Nobody else can connect. This is the old behaviour.
+- **Host for friends.** The same, but friends can join your world while your game is running.
+- **Join a friend.** No server here. The game connects to a friend's PC.
+
+Tick "don't ask again" if you always want the same one. `friends.bat ask` in the install folder brings the question back, and `friends.bat default host` (or `solo`, `join`) sets one without asking. On Linux and the Steam Deck it is `./friends.sh`.
+
 Two things are always true:
 
 - Friends can only play while your game is running. Clicking Play starts the server, and it stays up after you close the game (until you stop it or reboot).
-- Everything is your own machine and your friends'. There is no account with anyone and nothing to sign up for. The one optional extra is Tailscale, below.
+- Everything runs on your own machines. There is no account with anyone and nothing to sign up for. The one optional extra is Tailscale, below.
 
-## 1. You: turn on hosting
+## Hosting
 
-Pick **Host for friends** in the installer, or, on an install you already have, double-click `friends.bat` in the install folder and run:
+Pick **Host for friends**. The first time, Windows asks (a normal admin prompt) to open port 2593 in its firewall; say yes. Then a window shows the address to give friends. `friends.bat` shows it again any time, along with whether the server is up and the firewall rule is there.
 
-```
-friends.bat host
-```
+If the server was already running from a solo session, the launcher offers to restart it, because it only reads its listening setting at start. Yes saves the world first and takes about half a minute. No keeps playing by yourself this time.
 
-Windows will ask once (a normal admin prompt) to open port 2593 in its firewall. Say yes. If you say no, friends will not get through until you run `friends.bat firewall`.
+On Linux, open TCP 2593 in your firewall if one is on (`sudo ufw allow 2593/tcp`, or the firewalld line at the top of `friends.sh`).
 
-Hosting changes take effect the next time the server starts. If it was already running, stop it (close its window, or reboot) and click Play again.
+## Getting friends to your PC
 
-`friends.bat` on its own, or the **UO Offline Friends** desktop shortcut, shows the address to give people.
+**Same house or LAN.** Give them the LAN address the launcher shows (something like `192.168.1.20`). That is all.
 
-## 2. Getting friends to your PC
+**Anywhere else: Tailscale.** Install [Tailscale](https://tailscale.com) on your PC and on each friend's PC. Log in with the same account, or invite them to yours. Every PC then gets a private `100.x.y.z` address that reaches the others from anywhere, with no router setup and nothing open to the internet. The launcher shows your Tailscale address under "From anywhere". ZeroTier works the same way.
 
-**Same house or LAN.** Give them the LAN address `friends.bat` shows (something like `192.168.1.20`). That is all.
+**Port forwarding.** Forwarding TCP 2593 on your router to your PC works too, and friends use your public IP. It exposes the port to everyone on the internet and home IPs change, so the two ways above are better. If you go this way, put your public IP or hostname in `ModernUO\Distribution\Configuration\modernuo.json` as `"serverListing.address": "your.public.ip"` so friends are sent to the right place after login. That setting also sends your own game there, so use it only if you really need it.
 
-**Anywhere else: Tailscale.** Install [Tailscale](https://tailscale.com) on your PC and on each friend's PC. Log in with the same account, or invite them to yours. Every PC then gets a private `100.x.y.z` address that reaches the others from anywhere, with no router setup and nothing open to the internet. `friends.bat` shows your Tailscale address under "From anywhere". ZeroTier works the same way.
+## Joining
 
-**Port forwarding.** Forwarding TCP 2593 on your router to your PC works too, and friends use your public IP. It exposes the port to everyone on the internet and home IPs change, so the two ways above are better. If you go this way, put your public IP or hostname in `ModernUO\Distribution\Configuration\modernuo.json` as `"serverListing.address": "your.public.ip"` so friends are sent to the right place after login.
-
-## 3. Friends: join
-
-Each friend runs the UO Offline installer and picks **Join a friend's game**, types your address, and picks a name and password. That install is client only: no server is built, so it is quicker and smaller. Their account is created on your server the first time they log in.
-
-On an install they already have:
-
-```
-friends.bat join 100.101.102.103 bob mypassword
-```
-
-Clicking Play then connects to you instead of starting a server. If your game is not running they get a message saying so.
-
-To go back to their own world: `friends.bat solo`.
+Each friend installs UO Offline the normal way (the whole thing, so they can host their own world another day), clicks it, and picks **Join a friend**. It asks for your address, a name, and a password. The account is created on your world the first time they log in. If your game is not running they get a message saying so.
 
 ## Things to know
 
@@ -49,12 +41,12 @@ To go back to their own world: `friends.bat solo`.
 - **Accounts.** Ten accounts per address. The first account on a fresh world is the owner (yours); friends are normal players.
 - **Saves.** Friends' characters are in your save, so your backups cover them.
 - **Versions.** Everyone needs a client the server accepts (7.0.23.1 or newer). The installer takes care of that.
-- **Slow first join.** The first login of a new account on a busy world takes a few seconds while the client receives everything around it.
+- **Older installs.** Re-run the installer once to get the new launcher. It skips finished steps.
 
 ## If a friend cannot connect
 
 1. Is your game running? The server starts when you click Play.
-2. Is hosting on? `friends.bat` should say "This PC HOSTS". If it says "plays by itself", run `friends.bat host` and restart the server.
+2. Did you pick Host for friends this session? `friends.bat` shows what the running server was started for. If it says solo, click UO Offline again, pick Host, and let it restart the server.
 3. Firewall rule present? `friends.bat` shows it. `friends.bat firewall` adds it again.
 4. Right address? LAN addresses only work on the same network. For Tailscale, both PCs need Tailscale running and logged into the same network.
-5. On their side, `friends.bat` shows what address they are set to.
+5. On their side, picking Join a friend again lets them retype the address.

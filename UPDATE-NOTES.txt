@@ -1,7 +1,7 @@
 I hope you are all having fun! I am going to do more large updates rather than a lot of smaller ones, so expect updates every week or 2. As always, if you have bugs to report or even suggestions, message me on reddit or GitHub.
 
 Recent Updates
--Play with friends. The installer now has Host for friends and Join a friend's game, and friends.bat switches an install later. Works on a LAN or over Tailscale. See docs/FRIENDS.md.
+-Play with friends. Clicking UO Offline now asks: play by myself, host for friends, or join a friend. Hosting lets friends into your world (LAN, or Tailscale from anywhere); joining connects you to theirs. See docs/FRIENDS.md.
 -You can recruit bots into your own guild at the guildstone. They join, wear your tag, and stay on the server for good (they survive restarts). Guild chat works, and "anyone wanna group up" in guild chat makes guild bots recall to you and join your party. Guild bots also chat in guild chat on their own, answer "what is everyone doing" with what they are really doing, and sometimes ask for a group themselves.
 -Thief bots actually steal now. They work banks and taverns, pick pockets (yours too), sometimes sneak up hidden, bank every lift, mostly run with The Thieves Guild [TG], work dungeons without fighting, run and hide when caught, and get guard whacked if caught next to a banker.
 -Bots were using magic arrow and not kiting enough when attacking each other. They should back off and use stronger spells now.
