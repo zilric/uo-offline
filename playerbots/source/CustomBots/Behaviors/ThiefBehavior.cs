@@ -30,9 +30,11 @@
 // the bot is close and can see it, so the thief runs first and hides when
 // it has a gap. Once hidden it stays put until the flag lapses.
 //
-// Loot goes to the bank. Stolen goods return to the victim if the thief
-// dies inside two minutes, so a thief with a good haul walks to the
-// counter and puts it in the box before anything else.
+// Loot goes to the bank after every lift. Stolen goods return to the
+// victim if the thief dies inside two minutes, so the thief walks to the
+// counter and puts each take in the box before trying again. The haul is
+// remembered per bot, because the walk to the bank swaps brains and the
+// thief that arrives is a fresh one.
 // =========================================================================
 
 using System;
@@ -68,9 +70,8 @@ namespace Server.CustomBots
         // whack for a torch.
         private const int WorthFloor = 15;
 
-        // Bank the take after this many lifts or this much value.
-        private const int FenceAfterLifts = 3;
-        private const int FenceAfterValue = 600;
+        // Bank the take after every successful lift.
+        private const int FenceAfterLifts = 1;
 
         // The engine's rule: item plus contents must weigh no more than this.
         private static int MaxWeight => Stealing.MaxWeightToSteal;
@@ -130,11 +131,55 @@ namespace Server.CustomBots
         private DateTime _nextHideTry;
         private DateTime _getawayStarted;
 
-        // Value of what is in the pack that was not there when the beat
-        // started. Drives the trip to the bank.
-        private int _haulValue;
-        private int _haulLifts;
-        private readonly List<Item> _haul = new();
+        // What this thief has lifted and not yet banked. Kept per bot, not
+        // per brain: the trip to the bank goes through a Traveler and the
+        // thief that arrives is a new ThiefBehavior.
+        private sealed class Haul
+        {
+            public int Gold;
+            public int Lifts;
+            public readonly List<Item> Items = new();
+            // Lifted stacks other than gold (reagents, gems, bandages):
+            // the type and how many, since they merge into the thief's own.
+            public readonly List<(Type type, int amount)> Stacks = new();
+        }
+
+        private static readonly Dictionary<PlayerBot, Haul> _hauls = new();
+
+        private static Haul HaulOf(PlayerBot bot)
+        {
+            if (!_hauls.TryGetValue(bot, out var haul))
+            {
+                if (_hauls.Count > 200)
+                {
+                    PruneHauls();
+                }
+                haul = new Haul();
+                _hauls[bot] = haul;
+            }
+            return haul;
+        }
+
+        private static void PruneHauls()
+        {
+            var gone = new List<PlayerBot>();
+            foreach (var (b, _) in _hauls)
+            {
+                if (b.Deleted)
+                {
+                    gone.Add(b);
+                }
+            }
+            foreach (var b in gone)
+            {
+                _hauls.Remove(b);
+            }
+        }
+
+        // The Traveler asks this on arrival at a bank: a thief carrying a
+        // take always goes to work there, so the take gets banked.
+        public static bool HasHaul(PlayerBot bot) =>
+            _hauls.TryGetValue(bot, out var h) && (h.Lifts > 0 || h.Gold > 0 || h.Items.Count > 0);
 
         // Stable per bot. Nerve decides whether this thief works marks that
         // are standing next to an NPC (a guard whack if caught) or keeps to
@@ -197,6 +242,14 @@ namespace Server.CustomBots
             if (bot.Criminal)
             {
                 StartGetaway(bot, null);
+                return;
+            }
+
+            // Arrived at the bank with a take in the pack: the counter
+            // comes before the next mark.
+            if (HasHaul(bot))
+            {
+                _nextLook = Core.Now;
             }
         }
 
@@ -267,7 +320,7 @@ namespace Server.CustomBots
                 return;
             }
 
-            if (FenceDue())
+            if (FenceDue(bot))
             {
                 BeginFence(bot);
                 return;
@@ -440,8 +493,15 @@ namespace Server.CustomBots
 
         // The bold ones work the counter. Low skill never does: a novice is
         // caught two tries in three and would die every few minutes.
+        // The test rig sets this so a run at the bank always tries.
+        public bool Fearless { get; set; }
+
         private bool TakesHotMarks(PlayerBot bot)
         {
+            if (Fearless)
+            {
+                return true;
+            }
             if (bot.Skills.Stealing.Value < 70.0)
             {
                 return false;
@@ -712,26 +772,32 @@ namespace Server.CustomBots
             // What left the victim's pack is the truth. A stolen stack of
             // gold or reagents merges into the thief's own stack on the
             // way in, so the thief's pack shows nothing new.
-            var (success, what, gold, value) = WhatLeft(victimBefore, mark);
+            var (success, what, gold, value, stackType, stackAmount) = WhatLeft(victimBefore, mark);
             if (!success)
             {
-                what = wanted != null ? Describe(wanted) : "something";
+                what = wanted != null ? DescribeAmount(wanted, 1) : "something";
             }
 
             if (success)
             {
                 Lifts++;
                 TotalLifts++;
-                _haulLifts++;
                 GoldTaken += gold;
-                _haulValue += gold + value;
 
-                // Loose items are what the box is for. Coins settle on
-                // their own at the counter.
+                var haul = HaulOf(bot);
+                haul.Lifts++;
+                haul.Gold += gold;
+                if (stackType != null && stackAmount > 0)
+                {
+                    haul.Stacks.Add((stackType, stackAmount));
+                }
+
+                // Loose items go in the box as they are. Coins are counted
+                // and the same amount is moved at the counter.
                 var got = FindNewItem(bot, packBefore);
                 if (got != null && !got.Stackable)
                 {
-                    _haul.Add(got);
+                    haul.Items.Add(got);
                 }
             }
 
@@ -758,7 +824,7 @@ namespace Server.CustomBots
 
             if (caught)
             {
-                TryEventLine(bot, 0.35, "thief_caught");
+                // Nothing to say. Run.
                 VictimReacts(bot, mark);
                 StartGetaway(bot, mark);
                 return;
@@ -795,7 +861,7 @@ namespace Server.CustomBots
 
         // Compare the victim's pack with the snapshot. Whole items gone,
         // or a stack that shrank, is what was taken.
-        private static (bool success, string what, int gold, int value) WhatLeft(
+        private static (bool success, string what, int gold, int value, Type stackType, int stackAmount) WhatLeft(
             List<PackRow> before, Mobile mark)
         {
             var pack = mark.Backpack;
@@ -832,17 +898,18 @@ namespace Server.CustomBots
                         int taken = was - now;
                         int g = item is Gold ? taken : 0;
                         int v = item is Gold ? 0 : BotAppraisal.Value(item) * taken / Math.Max(1, row.Amount);
-                        return (true, DescribeAmount(item, taken), g, v);
+                        return (true, DescribeAmount(item, taken), g, v,
+                                item is Gold ? null : type, item is Gold ? 0 : taken);
                     }
                     continue;
                 }
 
                 if (item.Deleted || item.RootParent != mark)
                 {
-                    return (true, DescribeAmount(item, 1), 0, BotAppraisal.Value(item));
+                    return (true, DescribeAmount(item, 1), 0, BotAppraisal.Value(item), null, 0);
                 }
             }
-            return (false, null, 0, 0);
+            return (false, null, 0, 0, null, 0);
         }
 
         private static string DescribeAmount(Item item, int amount)
@@ -1131,7 +1198,8 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         // Fence — walk to the counter and put the take in the box.
         // -------------------------------------------------------------------
-        private bool FenceDue() => _haulLifts >= FenceAfterLifts || _haulValue >= FenceAfterValue;
+        private static bool FenceDue(PlayerBot bot) =>
+            _hauls.TryGetValue(bot, out var h) && h.Lifts >= FenceAfterLifts;
 
         private void BeginFence(PlayerBot bot)
         {
@@ -1149,9 +1217,10 @@ namespace Server.CustomBots
                 return;
             }
 
+            var take = HaulOf(bot);
             Console.WriteLine(
                 $"[thief] {bot.Name} heading to {bank.Name} to bank the take " +
-                $"({_haulValue} gp worth)");
+                $"({take.Gold} gold, {take.Items.Count} item(s))");
             bot.Behavior = new TravelerBehavior { DestinationName = bank.Name };
         }
 
@@ -1164,17 +1233,19 @@ namespace Server.CustomBots
         private void DoFence(PlayerBot bot)
         {
             var banker = FindBanker(bot);
+            var haul = HaulOf(bot);
             int items = 0;
             int gold = 0;
 
             if (banker != null)
             {
                 var box = bot.BankBox;
+                var pack = bot.Backpack;
                 if (box != null)
                 {
-                    for (int i = _haul.Count - 1; i >= 0; i--)
+                    for (int i = haul.Items.Count - 1; i >= 0; i--)
                     {
-                        var item = _haul[i];
+                        var item = haul.Items[i];
                         if (item == null || item.Deleted || item.RootParent != bot)
                         {
                             continue;
@@ -1184,12 +1255,36 @@ namespace Server.CustomBots
                             items++;
                         }
                     }
-                }
 
-                int before = bot.Backpack?.GetAmount(typeof(Gold)) ?? 0;
-                if (BotBanking.Settle(bot))
-                {
-                    gold = before - (bot.Backpack?.GetAmount(typeof(Gold)) ?? 0);
+                    // The lifted coins, and only those. The purse stays.
+                    int have = pack?.GetAmount(typeof(Gold)) ?? 0;
+                    int move = Math.Min(haul.Gold, have);
+                    if (move > 0 && pack.ConsumeTotal(typeof(Gold), move))
+                    {
+                        box.DropItem(new Gold(move));
+                        gold = move;
+                    }
+
+                    // Lifted reagents, gems and the like: the same count
+                    // that was taken comes back out of the thief's stack.
+                    foreach (var (type, amount) in haul.Stacks)
+                    {
+                        int own = pack?.GetAmount(type) ?? 0;
+                        int n = Math.Min(amount, own);
+                        if (n <= 0 || !pack.ConsumeTotal(type, n))
+                        {
+                            continue;
+                        }
+                        Item part = null;
+                        try { part = type.CreateInstance<Item>(); } catch { }
+                        if (part == null)
+                        {
+                            continue;
+                        }
+                        part.Amount = n;
+                        box.DropItem(part);
+                        items++;
+                    }
                 }
 
                 if (items > 0 || gold > 0)
@@ -1201,9 +1296,7 @@ namespace Server.CustomBots
                 }
             }
 
-            _haul.Clear();
-            _haulValue = 0;
-            _haulLifts = 0;
+            _hauls.Remove(bot);
             _mode = Mode.Prowl;
             _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(10, 30));
         }

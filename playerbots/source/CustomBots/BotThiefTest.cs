@@ -102,7 +102,7 @@ namespace Server.CustomBots
             int liftsBefore    = ThiefBehavior.TotalLifts;
             int caughtBefore   = ThiefBehavior.TotalCaught;
 
-            thief.Behavior = new ThiefBehavior();
+            thief.Behavior = new ThiefBehavior { Fearless = town };
 
             var place = BotEventJournal.PlaceName(spot, map);
             findings.Add(

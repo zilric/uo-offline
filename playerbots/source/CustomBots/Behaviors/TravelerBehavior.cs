@@ -2589,7 +2589,8 @@ private bool ZoneArrival(PlayerBot bot, int fallbackRange)
                      ZoneArrival(bot, 15))
             {
                 targetBehavior  = "Thief";
-                chance          = 0.85;
+                // Carrying a take: the bank is the point of the trip.
+                chance          = ThiefBehavior.HasHaul(bot) ? 1.0 : 0.85;
                 visitMinMinutes = 8;
                 visitMaxMinutes = 20;
             }
