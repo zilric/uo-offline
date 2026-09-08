@@ -26,6 +26,12 @@
 // 1999, and the thief knows it: most of them only rob marks standing away
 // from the NPCs, and the bold ones gamble.
 //
+// Some approaches are made in stealth: hide, creep up hidden, peek while
+// hidden, lift. The lift itself always reveals the thief (engine rule),
+// so after a clean one the thief hides again and slips a few tiles off
+// before the next mark or the walk to the bank. Stealth needs Hiding 80,
+// light armour, walking only; each use buys Stealth/10 steps.
+//
 // The getaway is running, then hiding. Hiding fails while anyone hunting
 // the bot is close and can see it, so the thief runs first and hides when
 // it has a gap. Once hidden it stays put until the flag lapses.
@@ -91,6 +97,16 @@ namespace Server.CustomBots
         // Odds a bot victim bothers to yell and call the guards.
         private const double VictimCallsChance = 0.75;
 
+        // Odds a thief that can stealth makes this approach hidden.
+        private const double SneakChance = 0.45;
+
+        // Odds a thief that walked up in the open vanishes after a clean
+        // lift anyway.
+        private const double HideAfterChance = 0.50;
+
+        // Armour rating at which the era refuses stealth.
+        private const int StealthArmorLimit = 26;
+
         // ---- Public counters, for the test rig and the status page ----
 
         public int Attempts { get; private set; }
@@ -124,6 +140,14 @@ namespace Server.CustomBots
         // The blade goes in the pack while working. Both hands must be free
         // to steal.
         private Item _pocketed;
+
+        // This approach is being made hidden.
+        private bool _sneaking;
+
+        // After a lift: a few hidden steps away from the mark before
+        // anything else.
+        private Point3D? _slipTo;
+        private DateTime _slipUntil;
 
         // Getaway bookkeeping.
         private Point3D _scene;
@@ -197,7 +221,9 @@ namespace Server.CustomBots
         public override string GetStatusLine(PlayerBot bot) => _mode switch
         {
             Mode.Prowl    => "working the crowd",
-            Mode.Approach => _mark != null ? $"sizing up {_mark.Name}" : "working the crowd",
+            Mode.Approach => _mark != null
+                ? (_sneaking ? $"sneaking up on {_mark.Name}" : $"sizing up {_mark.Name}")
+                : "working the crowd",
             Mode.Case     => _mark != null ? $"next to {_mark.Name}" : "working the crowd",
             Mode.Getaway  => "getting away",
             Mode.Hidden   => "hiding with the flag on",
@@ -320,13 +346,31 @@ namespace Server.CustomBots
                 return;
             }
 
+            // Just lifted something and vanished: a few quiet steps away
+            // first, then the counter.
+            if (_slipTo != null)
+            {
+                if (bot.Hidden && Core.Now < _slipUntil && !bot.InRange(_slipTo.Value, 1))
+                {
+                    KeepStealth(bot);
+                    WalkTo(bot, _slipTo.Value, run: false);
+                    return;
+                }
+                _slipTo = null;
+                StopStepTimer();
+            }
+
             if (FenceDue(bot))
             {
                 BeginFence(bot);
                 return;
             }
 
-            TrySpeak(bot);
+            // Talking gives a hidden thief away.
+            if (!bot.Hidden)
+            {
+                TrySpeak(bot);
+            }
 
             // Drifted off the beat (shoved, or a getaway ended out on the
             // street). Walk back before looking again.
@@ -367,11 +411,87 @@ namespace Server.CustomBots
             _mode      = Mode.Approach;
             _follower  = null;
 
+            // Already hidden from the last lift: stay that way. Otherwise
+            // some approaches are made in stealth.
+            _sneaking = bot.Hidden
+                ? TrySneak(bot)
+                : CanSneak(bot) && Utility.RandomDouble() < SneakChance && TrySneak(bot);
+            if (!_sneaking && bot.Hidden)
+            {
+                bot.RevealingAction();
+            }
+
             if (Verbose)
             {
                 Console.WriteLine(
-                    $"[thief] {bot.Name} eyeing {mark.Name} " +
+                    $"[thief] {bot.Name} {(_sneaking ? "sneaking up on" : "eyeing")} {mark.Name} " +
                     $"{bot.GetDistanceToSqrt(mark.Location):0} tiles off");
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Stealth. The engine's own skills: Hiding, then Stealth for a
+        // handful of quiet steps. Both can fail and a failed Stealth
+        // reveals.
+        // -------------------------------------------------------------------
+        private static bool CanSneak(PlayerBot bot) =>
+            !bot.Mounted &&
+            bot.Skills.Hiding.Base >= Stealth.HidingRequirement &&
+            bot.Skills.Stealth.Value >= 30.0 &&
+            Stealth.GetArmorRating(bot) < StealthArmorLimit;
+
+        private static bool TrySneak(PlayerBot bot)
+        {
+            if (!bot.Hidden)
+            {
+                try { Hiding.OnUse(bot); } catch { }
+                if (!bot.Hidden)
+                {
+                    return false;
+                }
+            }
+            try { Stealth.OnUse(bot); } catch { }
+            return bot.Hidden && bot.AllowedStealthSteps > 0;
+        }
+
+        // Called before each hidden step: buy more steps when they are
+        // spent, so the creep does not end mid-plaza.
+        private void KeepStealth(PlayerBot bot)
+        {
+            if (bot.Hidden && bot.AllowedStealthSteps <= 0)
+            {
+                try { Stealth.OnUse(bot); } catch { }
+            }
+            if (!bot.Hidden)
+            {
+                _sneaking = false;
+            }
+        }
+
+        // After a clean lift the thief is visible (the lift reveals). Hide
+        // again and slip a few tiles away from the mark.
+        private void SlipAway(PlayerBot bot, Mobile mark)
+        {
+            bool wants = _sneaking || Utility.RandomDouble() < HideAfterChance;
+            _sneaking = false;
+            if (!wants || !CanSneak(bot) || !TrySneak(bot))
+            {
+                StepAwayFrom(bot, bot.GetDirectionTo(mark));
+                return;
+            }
+
+            var away = (Direction)(((int)bot.GetDirectionTo(mark) + 4) & 0x7);
+            var p = bot.Location;
+            for (int i = 0; i < 5; i++)
+            {
+                Movement.Movement.Offset(away, ref p);
+            }
+            _slipTo = new Point3D(p.X, p.Y, bot.Map.GetAverageZ(p.X, p.Y));
+            _slipUntil = Core.Now + TimeSpan.FromSeconds(12);
+
+            if (Verbose)
+            {
+                Console.WriteLine($"[thief] {bot.Name} hides again and slips off");
             }
         }
 
@@ -559,9 +679,15 @@ namespace Server.CustomBots
                 return;
             }
 
-            // Walk when close, so it reads as someone drifting over. Run
-            // when the mark is across the plaza.
-            WalkTo(bot, _mark, run: bot.GetDistanceToSqrt(_mark.Location) > 6);
+            if (_sneaking && !bot.Hidden)
+            {
+                // Blown. Carry on in the open.
+                _sneaking = false;
+            }
+
+            // Hidden: walk, running reveals. Otherwise walk when close, so
+            // it reads as someone drifting over, and run across the plaza.
+            WalkTo(bot, _mark, run: !_sneaking && bot.GetDistanceToSqrt(_mark.Location) > 6);
         }
 
         private bool MarkStillGood(PlayerBot bot) => WhyMarkGone(bot) == null;
@@ -591,6 +717,7 @@ namespace Server.CustomBots
             }
             _mark = null;
             _follower = null;
+            _sneaking = false;
             StopStepTimer();
             _mode = Mode.Prowl;
             _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(3, 8));
@@ -830,11 +957,12 @@ namespace Server.CustomBots
                 return;
             }
 
-            // Clean. Wander off a step or two and look innocent.
+            // Clean. Vanish and slip off, or just wander a step and look
+            // innocent.
             _mark = null;
             _mode = Mode.Prowl;
             _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(8, 25));
-            StepAwayFrom(bot, bot.GetDirectionTo(mark));
+            SlipAway(bot, mark);
         }
 
         private readonly struct PackRow
@@ -1039,6 +1167,8 @@ namespace Server.CustomBots
         {
             _mark = null;
             _follower = null;
+            _sneaking = false;
+            _slipTo = null;
             StopStepTimer();
             _scene = from?.Location ?? bot.Location;
             _runSteps = 0;
@@ -1466,7 +1596,11 @@ namespace Server.CustomBots
                         StopStepTimer();
                         return;
                     }
-                    if (_follower.Follow(_running, 1))
+                    if (_sneaking || (_slipTo != null && bot.Hidden))
+                    {
+                        KeepStealth(bot);
+                    }
+                    if (_follower.Follow(_running && !bot.Hidden, 1))
                     {
                         StopStepTimer();
                     }
