@@ -33,7 +33,12 @@ namespace Server.CustomBots
         // the invite and the walk over.
         public const int DefaultLinger = 120;
 
-        private const int Recruits = 2;
+        private const int Recruits = 4;
+
+        // The rig's founder has no client, so the chatter clock treats it
+        // as online through this.
+        private static readonly HashSet<Mobile> _rigs = new();
+        public static bool IsRig(Mobile m) => m != null && _rigs.Contains(m);
 
         public static void Configure()
         {
@@ -92,6 +97,7 @@ namespace Server.CustomBots
             };
             rig.MoveToWorld(spot, Map.Felucca);
             rig.Hits = rig.HitsMax;
+            _rigs.Add(rig);
 
             var guild = new Guild(rig, "Test Guild", "TST");
 
@@ -129,8 +135,16 @@ namespace Server.CustomBots
                 $"WATCH guild rig running for {lingerSeconds}s — expect \"[guild] ... joined [TST]\", " +
                 "the call, \"[guild] [TST] ...: yeah\", recalls and \"[party] ... joined Guild Test's party\"");
 
-            // Give the recruits time to join, then make the call.
-            Timer.DelayCall(TimeSpan.FromSeconds(14), () => Call(rig, guild, recruits));
+            // Give the recruits time to join. Then, in order: a hello, a
+            // "what is everyone doing", a bot's own call for a group (its
+            // guildmates recall to it and form a crew), the crew released,
+            // and finally the player's call.
+            Timer.DelayCall(TimeSpan.FromSeconds(14), () => Speak(rig, guild, recruits, "hey guys", "hello"));
+            Timer.DelayCall(TimeSpan.FromSeconds(22), () => Speak(rig, guild, recruits, "what is everyone doing", "status ask"));
+            Timer.DelayCall(TimeSpan.FromSeconds(40), () => BotCall(rig, guild, recruits, 6));
+            int playerCallAt = Math.Max(60, lingerSeconds - 100);
+            Timer.DelayCall(TimeSpan.FromSeconds(playerCallAt - 8), () => FreeCrew(recruits));
+            Timer.DelayCall(TimeSpan.FromSeconds(playerCallAt), () => Call(rig, guild, recruits));
 
             Timer.DelayCall(TimeSpan.FromSeconds(lingerSeconds), () =>
             {
@@ -149,6 +163,71 @@ namespace Server.CustomBots
             });
 
             return Report(findings);
+        }
+
+        private static void Speak(PlayerMobile rig, Guild guild, List<PlayerBot> recruits, string text, string what)
+        {
+            if (rig.Deleted)
+            {
+                return;
+            }
+            rig.DoSpeech(text, Array.Empty<int>(), MessageType.Guild, 0x3B2);
+            Console.WriteLine($"[TestGuild] Guild Test said in guild chat ({what}): {text}");
+        }
+
+        // A guild bot asks for a group. The leader is the first recruit
+        // that can lead a hunt; the rest answer it.
+        private static void BotCall(PlayerMobile rig, Guild guild, List<PlayerBot> recruits, int triesLeft)
+        {
+            PlayerBot leader = null;
+            foreach (var bot in recruits)
+            {
+                if (!bot.Deleted && bot.Guild == guild && bot.Party == null &&
+                    BotPartyManager.CanLeadHunt(bot))
+                {
+                    leader = bot;
+                    break;
+                }
+            }
+            if (leader == null)
+            {
+                // Mid-fight, or no dungeon reachable from where it stands
+                // right now. Try again shortly.
+                if (triesLeft > 0)
+                {
+                    Timer.DelayCall(TimeSpan.FromSeconds(6), () => BotCall(rig, guild, recruits, triesLeft - 1));
+                    return;
+                }
+                Console.WriteLine("[TestGuild] FAIL no recruit could lead a hunt (busy, or no dungeon on its landmass)");
+                return;
+            }
+            bool ok = BotGuildChat.BotAsksForGroup(guild, leader);
+            Console.WriteLine($"[TestGuild] {(ok ? "OK  " : "FAIL")} {leader.Name} ({leader.Class}) asked the guild for a group");
+        }
+
+        // Break the bot crew up so the same bots can answer the player.
+        private static void FreeCrew(List<PlayerBot> recruits)
+        {
+            int freed = 0;
+            foreach (var bot in recruits)
+            {
+                if (!bot.Deleted && BotPartyManager.IsInParty(bot))
+                {
+                    freed++;
+                }
+            }
+            Console.WriteLine($"[TestGuild] {(freed > 0 ? "OK  " : "FAIL")} bot crew had {freed} member(s) in a bot party; freeing them for the player's call");
+            foreach (var bot in recruits)
+            {
+                if (!bot.Deleted)
+                {
+                    BotPartyManager.DisbandInvolving(bot);
+                    if (bot.Behavior is IdleBehavior or PartyMemberBehavior)
+                    {
+                        bot.Behavior = new TravelerBehavior();
+                    }
+                }
+            }
         }
 
         private static void Call(PlayerMobile rig, Guild guild, List<PlayerBot> recruits)
@@ -204,6 +283,12 @@ namespace Server.CustomBots
                     bot.Murderer || bot.Criminal || bot.LifecycleExempt ||
                     DungeonRegistry.IsInDungeon(bot) ||
                     !BotPlayerParty.CanJoin(bot, out _) || !MagicTravel.CanCastRecall(bot))
+                {
+                    continue;
+                }
+                // The first pick must be able to lead a hunt (the bot-led
+                // call needs a fighter with a dungeon on its landmass).
+                if (far.Count == 0 && near.Count == 0 && !BotPartyManager.CanLeadHunt(bot))
                 {
                     continue;
                 }
@@ -293,6 +378,7 @@ namespace Server.CustomBots
             foreach (var m in rigs)
             {
                 try { Party.Get(m)?.Disband(); } catch { }
+                _rigs.Remove(m);
                 try { m.Delete(); } catch { }
                 n++;
             }
@@ -329,6 +415,7 @@ namespace Server.CustomBots
                 }
                 try
                 {
+                    BotPartyManager.DisbandInvolving(bot);
                     if (bot.Party is Party p) { p.Remove(bot); }
                     bot.Party = null;
                     if (bot.Guild == guild) { guild.RemoveMember(bot); }
@@ -348,6 +435,7 @@ namespace Server.CustomBots
             {
                 corpse.Delete();
             }
+            _rigs.Remove(rig);
             if (!rig.Deleted)
             {
                 rig.Delete();
