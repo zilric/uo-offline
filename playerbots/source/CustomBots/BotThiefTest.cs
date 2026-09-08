@@ -109,6 +109,7 @@ namespace Server.CustomBots
                 $"{(thief.NpcGuild == NpcGuild.ThievesGuild ? "OK  " : "FAIL")} thief {thief.Name} " +
                 $"stealing={thief.Skills.Stealing.Value:0} snooping={thief.Skills.Snooping.Value:0} " +
                 $"hiding={thief.Skills.Hiding.Value:0} guild={thief.NpcGuild} " +
+                $"tag={BotGuilds.Get(thief.BotGuildIndex)?.Tag ?? "none"} " +
                 $"hands={(thief.FindItemOnLayer(Layer.OneHanded) == null && thief.FindItemOnLayer(Layer.TwoHanded) == null ? "free" : "FULL")}");
             findings.Add(
                 $"OK   two marks with 400gp, 30 pearls, a gem and bandages each at {place} " +

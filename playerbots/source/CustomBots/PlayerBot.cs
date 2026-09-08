@@ -299,8 +299,8 @@ namespace Server.CustomBots
             CrafterSpec = CrafterTypeHelper.RollRandom();
 
             // Guild membership — ~40% of the population, weighted so big
-            // and small guilds emerge.
-            BotGuildIndex = BotGuilds.RollMembership();
+            // and small guilds emerge. Thieves mostly join their own.
+            BotGuildIndex = BotGuilds.RollMembership(Class);
 
             // Home city — where this bot "lives"; its destination rolls
             // favor home, so regulars emerge at every bank and forge.
@@ -459,6 +459,13 @@ namespace Server.CustomBots
             ApplyClassStats();
             EquipmentTable.RollOutfit(this, Class, SkillTier);
             JoinThievesGuildIfThief();
+
+            // A bot re-derived into or out of the Thief class re-rolls its
+            // guild, so the thieves guild only ever holds thieves.
+            if (cls == BotClass.Thief || BotGuilds.Get(BotGuildIndex)?.ThievesOnly == true)
+            {
+                BotGuildIndex = BotGuilds.RollMembership(cls);
+            }
         }
 
         // Thieves carry the guild card, nobody else does. Stealing.cs only
