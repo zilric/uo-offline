@@ -154,6 +154,58 @@ namespace Server.CustomBots
         // via ApplyNameSuffix.
         public int BotGuildIndex = -1;
 
+        // ---- Real guild membership ----
+        //
+        // True once a real player has recruited this bot into a real
+        // guild (Server.Guilds.Guild). A bound bot is a permanent resident:
+        // the session manager never logs it out, the boot purge and the
+        // regenerations leave it alone, and its spawner forgets it so the
+        // slot refills with somebody new. It keeps living its life; it
+        // just never leaves. Saved with the bot (v7). Cleared again if the
+        // guild lets it go or disbands.
+        public bool GuildBound;
+
+        public bool IsPermanent => GuildBound && Guild is Server.Guilds.Guild;
+
+        public override void OnGuildChange(Server.Guilds.BaseGuild oldGuild)
+        {
+            base.OnGuildChange(oldGuild);
+
+            if (Guild is Server.Guilds.Guild g)
+            {
+                GuildBound = true;
+                DisplayGuildTitle = true;
+
+                // The real tag replaces the pretend one, or the name line
+                // would read "Name [TST] [UDL]".
+                BotGuildIndex = -1;
+
+                // Out of the spawner's books: the spawner refills the slot
+                // with a fresh bot and this one is its own person now.
+                if (Spawner != null)
+                {
+                    try { Spawner.Remove(this); } catch { }
+                    Spawner = null;
+                }
+
+                // A bank fixture that got recruited leaves its post.
+                if (LifecycleExempt)
+                {
+                    LifecycleExempt = false;
+                    BotSessionManager.FixedRoleCount--;
+                }
+
+                InvalidateProperties();
+                Console.WriteLine($"[guild] {Name} is now a member of [{g.Abbreviation}] {g.Name}");
+            }
+            else if (oldGuild != null && GuildBound)
+            {
+                GuildBound = false;
+                InvalidateProperties();
+                Console.WriteLine($"[guild] {Name} is out of {oldGuild.Name}, back to an ordinary life");
+            }
+        }
+
         // ---- Session state (BotSessionManager) ----
         //
         // When this bot's play session ends — it says goodbye and logs
@@ -1004,7 +1056,7 @@ namespace Server.CustomBots
         {
             base.Serialize(writer);
 
-            writer.Write(6);                                       // version
+            writer.Write(7);                                       // version
             writer.Write(IsBot);
             writer.Write(_behavior?.SerializableName ?? "Idle");
             Personality.Write(writer);
@@ -1013,6 +1065,7 @@ namespace Server.CustomBots
             writer.Write((byte)SkillTier);
             writer.Write((byte)CrafterSpec);                       // v5 layout (3 subtypes)
             writer.Write(BotGuildIndex);                           // v6
+            writer.Write(GuildBound);                              // v7
         }
 
         public override void Deserialize(IGenericReader reader)
@@ -1077,6 +1130,10 @@ namespace Server.CustomBots
                 // Pre-guild bots roll membership on load so an old save
                 // still produces a guilded population.
                 BotGuildIndex = BotGuilds.RollMembership();
+            }
+            if (version >= 7)
+            {
+                GuildBound = reader.ReadBool();
             }
 
             // Migrate legacy Crafter-class bots (saved before the split into

@@ -696,6 +696,15 @@ namespace Server.CustomBots
         // -------------------------------------------------------------------
         private static void HandOffFreshTraveler(PlayerBot bot, string destName, string how)
         {
+            // A guildmate that recalled to a player's call stands where it
+            // landed and waits for the party invite instead of setting off
+            // somewhere new.
+            if (BotGuildChat.OnLanded(bot))
+            {
+                Console.WriteLine($"[MagicTravel] {bot.Name}: {how} -> the guild call, waiting for the invite");
+                return;
+            }
+
             try
             {
                 bot.Behavior = RedTerritory.TravelBrain(bot, destName);

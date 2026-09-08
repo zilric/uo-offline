@@ -94,14 +94,29 @@ namespace Server.CustomBots
         private static int PurgeStaleBots()
         {
             var stale = new List<PlayerBot>();
+            int kept = 0;
             foreach (var m in World.Mobiles.Values)
             {
-                if (m is PlayerBot bot && !bot.Deleted)
-                    stale.Add(bot);
+                if (m is not PlayerBot bot || bot.Deleted)
+                {
+                    continue;
+                }
+                // Members of a player's guild stay. They are the one kind
+                // of bot that is meant to be there after a restart.
+                if (bot.IsPermanent)
+                {
+                    kept++;
+                    continue;
+                }
+                stale.Add(bot);
             }
             foreach (var bot in stale)
             {
                 try { bot.Delete(); } catch { }
+            }
+            if (kept > 0)
+            {
+                Console.WriteLine($"[Startup] kept {kept} guild-bound bot(s) through the purge");
             }
             return stale.Count;
         }

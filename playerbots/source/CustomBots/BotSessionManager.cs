@@ -225,6 +225,7 @@ namespace Server.CustomBots
         // catch it once things calm down. Ghosts don't say "gtg", and a
         // bot mid corpse-run finishes the story before logging.
         private static bool CanLogoutNow(PlayerBot bot) =>
+            !bot.IsPermanent && // a player's guildmate never logs out for good
             bot.Alive &&
             !bot.LoggingOut &&
             !bot.CorpseRunPending &&

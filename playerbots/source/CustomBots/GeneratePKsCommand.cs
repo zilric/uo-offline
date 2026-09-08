@@ -345,7 +345,7 @@ namespace Server.CustomBots
             var pks = new List<PlayerBot>();
             foreach (var m in World.Mobiles.Values)
             {
-                if (m is PlayerBot bot && !bot.Deleted &&
+                if (m is PlayerBot bot && !bot.Deleted && !bot.IsPermanent &&
                     bot.Behavior is PKBehavior)
                 {
                     pks.Add(bot);
