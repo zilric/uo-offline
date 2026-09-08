@@ -21,14 +21,23 @@ die()  { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 # but it's also runnable straight from the repo (./scripts/start-server.sh)
 # for testing. Either way the server root is locked to ./server-runtime
 # next to the repo root - never wherever this particular copy happens to
-# sit - so resolve it the same way install-server.sh does: one directory
-# above wherever this script's own directory is. Both scripts/ (the
-# checked-in copy) and server-runtime/ (the deployed copy) sit directly
-# under the repo root, so "one level up from here" lands on the repo root
-# in both cases, and REPO_ROOT/server-runtime always lands on the real
-# install.
-REPO_ROOT="$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)"
-INSTALL_ROOT="${REPO_ROOT}/server-runtime"
+# sit. Resolve it from this script's own real location (pwd -P follows
+# symlinks) rather than chaining two dirname calls on BASH_SOURCE blindly:
+# a deployed copy sits directly inside server-runtime/ itself, while the
+# checked-in copy sits in scripts/ one level below the repo root, and
+# naive double-dirname math only happens to work for those two exact
+# cases when invoked with the paths it expects — it breaks (double-
+# nesting server-runtime/server-runtime/...) under other invocation
+# styles. Branching on the actual directory name is robust regardless of
+# how or from where the script is invoked.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+if [[ "$(basename "${SCRIPT_DIR}")" == "server-runtime" ]]; then
+  INSTALL_ROOT="${SCRIPT_DIR}"
+  REPO_ROOT="$(dirname "${SCRIPT_DIR}")"
+else
+  REPO_ROOT="$(dirname "${SCRIPT_DIR}")"
+  INSTALL_ROOT="${REPO_ROOT}/server-runtime"
+fi
 DIST_DIR="${INSTALL_ROOT}/ModernUO/Distribution"
 PIDFILE="${INSTALL_ROOT}/modernuo.pid"
 LOGFILE="${INSTALL_ROOT}/modernuo.log"
@@ -49,6 +58,14 @@ else
 fi
 export DOTNET_ROOT
 export PATH="${DOTNET_ROOT}:${PATH}"
+
+# Argon2.Bindings ships no linux-x64 native library at all (see
+# install-server.sh's ensure_libargon2) — on hosts where the system
+# libargon2 couldn't be used, install-server.sh bundles its own copy
+# straight into Distribution/ and Distribution/runtimes/linux-x64/native/.
+# Put both ahead of whatever's already in LD_LIBRARY_PATH so the bundled
+# copy is found even if an incompatible system one also exists.
+export LD_LIBRARY_PATH="${DIST_DIR}:${DIST_DIR}/runtimes/linux-x64/native:${LD_LIBRARY_PATH:-}"
 
 [[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built at ${DIST_DIR}/ModernUO.dll. Run: ${REPO_ROOT}/install-server.sh install"
 command -v dotnet >/dev/null 2>&1 || die "dotnet not found (looked in \$PATH and ${DOTNET_ROOT}). Run the installer first."
@@ -132,103 +149,126 @@ if [[ -f "${MARKER}" ]]; then
   # for a person, and we still get the output in the log.
   # ---------------------------------------------------------------------
   say "First launch: running ModernUO setup wizard and creating owner account."
-  say "This takes 30-60 seconds while the world saves are generated."
-
-  # FIFO keeps stdin open across multiple `printf` writes.
-  FIFO="$(mktemp -u "${INSTALL_ROOT}/.stdin.XXXXXX")"
-  mkfifo "${FIFO}"
-  exec 9<>"${FIFO}"
-  rm -f "${FIFO}"
-
-  # Truncate log so we don't match prompts from a previous failed run.
-  : > "${LOGFILE}"
 
   if command -v script >/dev/null 2>&1; then
+    say "This takes 30-60 seconds while the world saves are generated."
+
+    # FIFO keeps stdin open across multiple `printf` writes.
+    FIFO="$(mktemp -u "${INSTALL_ROOT}/.stdin.XXXXXX")"
+    mkfifo "${FIFO}"
+    exec 9<>"${FIFO}"
+    rm -f "${FIFO}"
+
+    # Truncate log so we don't match prompts from a previous failed run.
+    : > "${LOGFILE}"
+
     # -q quiet, -e return the child's status, -f flush after every write
     # so the prompt reaches the log before we look for it.
     nohup script -qefc "dotnet ModernUO.dll" /dev/null <&9 >"${LOGFILE}" 2>&1 &
-  else
-    # No script(1) (util-linux). The wizard cannot be driven without a
-    # tty, so run it plainly; it will ask on the console and the
-    # manual-fallback message below explains what to do.
-    warn "script(1) not found - the setup wizard needs it to answer the prompts."
-    nohup dotnet ModernUO.dll >"${LOGFILE}" 2>&1 &
-  fi
-  SERVER_PID=$!
-  echo "${SERVER_PID}" > "${PIDFILE}"
+    SERVER_PID=$!
+    echo "${SERVER_PID}" > "${PIDFILE}"
 
-  # ---------------------------------------------------------------------
-  # wait_for_log_line <pattern> <timeout-seconds>
-  # Returns 0 when the pattern appears in the log, 1 on timeout or if
-  # the server process died.
-  # ---------------------------------------------------------------------
-  wait_for_log_line() {
-    local pattern="$1"
-    local timeout="${2:-30}"
-    local elapsed=0
-    while [[ ${elapsed} -lt ${timeout} ]]; do
-      if grep -qE "${pattern}" "${LOGFILE}" 2>/dev/null; then
-        return 0
-      fi
-      if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
-        warn "Server process died during wizard. See ${LOGFILE}"
-        return 1
-      fi
-      sleep 1
-      elapsed=$((elapsed + 1))
-    done
-    warn "Timed out (${timeout}s) waiting for log pattern: ${pattern}"
-    return 1
-  }
+    # -------------------------------------------------------------------
+    # wait_for_log_line <pattern> <timeout-seconds>
+    # Returns 0 when the pattern appears in the log, 1 on timeout or if
+    # the server process died.
+    # -------------------------------------------------------------------
+    wait_for_log_line() {
+      local pattern="$1"
+      local timeout="${2:-30}"
+      local elapsed=0
+      while [[ ${elapsed} -lt ${timeout} ]]; do
+        if grep -qE "${pattern}" "${LOGFILE}" 2>/dev/null; then
+          return 0
+        fi
+        if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+          warn "Server process died during wizard. See ${LOGFILE}"
+          return 1
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+      done
+      warn "Timed out (${timeout}s) waiting for log pattern: ${pattern}"
+      return 1
+    }
 
-  # Step 1: shard-name prompt → accept default.
-  if wait_for_log_line "name of your shard" 30; then
-    say "Shard-name prompt detected → accepting default name."
-    printf '\n' >&9
-  fi
+    # Step 1: shard-name prompt → accept default.
+    if wait_for_log_line "name of your shard" 30; then
+      say "Shard-name prompt detected → accepting default name."
+      printf '\n' >&9
+    fi
 
-  # Step 3: account-creation prompt → answer "y".
-  if wait_for_log_line "create the owner account" 30; then
-    say "Account-creation prompt detected → answering y."
-    printf 'y\n' >&9
-  fi
+    # Step 3: account-creation prompt → answer "y".
+    if wait_for_log_line "create the owner account" 30; then
+      say "Account-creation prompt detected → answering y."
+      printf 'y\n' >&9
+    fi
 
-  # Step 4: username prompt.
-  if wait_for_log_line "Input Username" 15; then
-    say "Username prompt detected → ${OWNER_USER}."
-    printf '%s\n' "${OWNER_USER}" >&9
-  fi
+    # Step 4: username prompt.
+    if wait_for_log_line "Input Username" 15; then
+      say "Username prompt detected → ${OWNER_USER}."
+      printf '%s\n' "${OWNER_USER}" >&9
+    fi
 
-  # Step 5: password prompt.
-  if wait_for_log_line "Input Password" 15; then
-    say "Password prompt detected → (hidden)."
-    printf '%s\n' "${OWNER_PASS}" >&9
-  fi
+    # Step 5: password prompt.
+    if wait_for_log_line "Input Password" 15; then
+      say "Password prompt detected → (hidden)."
+      printf '%s\n' "${OWNER_PASS}" >&9
+    fi
 
-  # Wait for account creation confirmation before clearing the marker.
-  if wait_for_log_line "Owner account created" 15; then
-    say "Owner account created: ${OWNER_USER} / ${OWNER_PASS}"
+    # Wait for account creation confirmation before clearing the marker.
+    if wait_for_log_line "Owner account created" 15; then
+      say "Owner account created: ${OWNER_USER} / ${OWNER_PASS}"
+      rm -f "${MARKER}"
+    else
+      warn "Did not see 'Owner account created' confirmation in log."
+      warn ""
+      warn "Create it by hand instead - this takes a minute and only happens once:"
+      warn ""
+      warn "    cd ${DIST_DIR}"
+      warn "    ${DOTNET_ROOT}/dotnet ModernUO.dll"
+      warn ""
+      warn "(The full path matters: .NET is installed privately under"
+      warn "${DOTNET_ROOT} and is not on your PATH, so a bare 'dotnet' will"
+      warn "say command not found. Do NOT apt install dotnet - you have it.)"
+      warn ""
+      warn "Answer 'y' when it asks about the owner account, then give it a"
+      warn "username and password (admin / admin is fine on a LAN-only box)."
+      warn "Wait for the Listening line, then press Ctrl+C to stop it."
+      warn "After that:"
+      warn ""
+      warn "    rm -f ${MARKER}"
+      warn ""
+      warn "and start the server normally. Full log: ${LOGFILE}"
+    fi
+  elif [[ -t 0 ]]; then
+    # No script(1) (util-linux) to fake a pty, but this script's own
+    # stdin IS a real terminal - so instead of trying to script answers
+    # down a pipe (guaranteed to crash the server: Core.Headless comes
+    # from Console.IsInputRedirected, and ConsoleInputHandler.ReadLine
+    # throws unconditionally when headless), just run the wizard directly
+    # in the foreground and let whoever is running this answer it live,
+    # exactly like a first run of ModernUO on its own would ask.
+    warn "script(1) not found - can't script the wizard's answers automatically."
+    say "Running the setup wizard directly: answer its prompts yourself."
+    say "Suggested answers: shard name -> press Enter, owner account -> y,"
+    say "username -> ${OWNER_USER}, password -> ${OWNER_PASS} (or your own)."
+    say "Once you see the server listening, press Ctrl-C here and it will"
+    say "be started normally in the background."
+    trap - EXIT INT TERM
+    dotnet ModernUO.dll
     rm -f "${MARKER}"
+    say "Owner account step done. Starting the server normally in the background..."
+    trap shutdown_server EXIT INT TERM
+    : > "${LOGFILE}"
+    nohup dotnet ModernUO.dll </dev/null >"${LOGFILE}" 2>&1 &
+    SERVER_PID=$!
+    echo "${SERVER_PID}" > "${PIDFILE}"
   else
-    warn "Did not see 'Owner account created' confirmation in log."
-    warn ""
-    warn "Create it by hand instead - this takes a minute and only happens once:"
-    warn ""
-    warn "    cd ${DIST_DIR}"
-    warn "    ${DOTNET_ROOT}/dotnet ModernUO.dll"
-    warn ""
-    warn "(The full path matters: .NET is installed privately under"
-    warn "${DOTNET_ROOT} and is not on your PATH, so a bare 'dotnet' will"
-    warn "say command not found. Do NOT apt install dotnet - you have it.)"
-    warn ""
-    warn "Answer 'y' when it asks about the owner account, then give it a"
-    warn "username and password (admin / admin is fine on a LAN-only box)."
-    warn "Wait for the Listening line, then press Ctrl+C to stop it."
-    warn "After that:"
-    warn ""
-    warn "    rm -f ${MARKER}"
-    warn ""
-    warn "and start the server normally. Full log: ${LOGFILE}"
+    die "First launch needs the setup wizard to create the owner account, but" \
+        "there's no script(1) and no terminal attached to answer it (stdin isn't a tty)." \
+        "Run this once directly from an interactive terminal (not via nohup or a background" \
+        "job) so the wizard can be answered, then it's safe to launch in the background."
   fi
 else
   say "Starting ModernUO server..."

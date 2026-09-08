@@ -224,6 +224,22 @@ dotnet_on_path_version() {
   printf '%s' "${ver}"
 }
 
+# Image-based/immutable Linux (Fedora Atomic variants - Silverblue,
+# Kinoite, CoreOS; Bazzite; SteamOS) mounts /usr read-only and rebuilds
+# the OS image as a whole via rpm-ostree/bootc instead of package-by-
+# package - a plain `dnf install`/`pacman -S` either errors immediately
+# or silently no-ops depending on the distro's own compatibility shim.
+# /run/ostree-booted is the canonical, distro-agnostic marker every
+# rpm-ostree/bootc-based system stamps at boot - checked first since it
+# covers Bazzite and SteamOS's own rpm-ostree-based images too, without
+# needing to name them individually. The os-release name check is a
+# belt-and-suspenders fallback for any image that doesn't stamp the
+# marker in a given release.
+is_immutable_os() {
+  [[ -f /run/ostree-booted ]] && return 0
+  [[ -f /etc/os-release ]] && grep -qiE 'bazzite|steamos' /etc/os-release
+}
+
 # Heuristic: git, curl, a usable dotnet, and (where ldconfig exists) a
 # couple of the native libs ModernUO links against. Not exhaustive - good
 # enough to tell "this box already has a working toolchain" from "needs
@@ -272,6 +288,18 @@ install_deps() {
     return
   fi
 
+  if is_immutable_os; then
+    warn "Immutable/image-based OS detected (rpm-ostree, Bazzite, or SteamOS) - /usr is read-only"
+    warn "here, and dnf/pacman install calls would fail or silently no-op rather than actually"
+    warn "installing anything. Skipping package-manager installation entirely."
+    print_manual_dep_instructions
+    warn "On an rpm-ostree/bootc host, 'rpm-ostree install <pkg>' (then reboot) is the closest"
+    warn "equivalent, or use a user-space package manager (Homebrew/Flatpak) that doesn't touch /usr."
+    warn "libargon2 specifically will be bundled automatically later in this run if it's still"
+    warn "missing once the build completes - see ensure_libargon2."
+    return
+  fi
+
   if [[ "${NO_ROOT}" == "1" ]]; then
     say "Skipping automatic package installation (--no-root)."
     print_manual_dep_instructions
@@ -310,6 +338,107 @@ install_deps() {
   command -v git >/dev/null || warn "git is still missing after the dependency step. Steps that need it will fail until it's installed."
 
   ok "Dependencies installed."
+}
+
+# ---------------------------------------------------------------------------
+# libargon2 for Argon2.Bindings (Accounting/Security/Argon2PasswordProtection.cs)
+# — the NuGet package only ships native binaries for osx-arm64/win-x64
+# (confirmed: ~/.nuget/packages/argon2.bindings/*/runtimes/ has no
+# linux-x64 folder at all) — Linux is expected to already have the distro's
+# own libargon2 installed system-wide. That assumption breaks on
+# immutable/atomic hosts (Fedora Atomic, Bazzite, SteamOS), where `dnf
+# install`/`pacman -S` can't write to /usr at all. This bundles a real
+# copy of libargon2.so straight into the published app's own directories
+# instead, using each distro's DOWNLOAD-ONLY package fetch (no root, no
+# /usr write) plus a local extract - never an arbitrary internet URL.
+# ---------------------------------------------------------------------------
+find_system_libargon2() {
+  local dir hit
+  for dir in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib /lib/x86_64-linux-gnu /usr/local/lib \
+             /home/linuxbrew/.linuxbrew/lib "${HOME}/.linuxbrew/lib"; do
+    for hit in "${dir}"/libargon2.so*; do
+      [[ -e "${hit}" ]] && { printf '%s' "${hit}"; return 0; }
+    done
+  done
+  if command -v ldconfig >/dev/null 2>&1; then
+    hit="$(ldconfig -p 2>/dev/null | awk -F'=> ' '/libargon2\.so/{print $2; exit}')"
+    [[ -n "${hit}" && -e "${hit}" ]] && { printf '%s' "${hit}"; return 0; }
+  fi
+  return 1
+}
+
+ensure_libargon2() {
+  local native_dir="${DIST_DIR}/runtimes/linux-x64/native"
+
+  if [[ -f "${native_dir}/libargon2.so" ]]; then
+    return
+  fi
+
+  local system_hit=""
+  if system_hit="$(find_system_libargon2)"; then
+    say "libargon2 already present on the host (${system_hit}); skipping the bundled copy."
+    return
+  fi
+
+  banner "Bundling libargon2 (ModernUO's Argon2.Bindings ships no linux-x64 native library)"
+
+  local work
+  work="$(mktemp -d)"
+  local found=""
+
+  if command -v dnf >/dev/null 2>&1; then
+    say "Fetching libargon2 via 'dnf download' (no install, no /usr write - safe on atomic hosts)..."
+    if dnf download --resolve --destdir="${work}" libargon2 >/dev/null 2>&1 \
+       || dnf download --resolve --destdir="${work}" argon2 >/dev/null 2>&1; then
+      local rpm
+      rpm="$(find "${work}" -maxdepth 1 -iname '*.rpm' | head -n1)"
+      if [[ -n "${rpm}" ]] && command -v rpm2cpio >/dev/null 2>&1 && command -v cpio >/dev/null 2>&1; then
+        (cd "${work}" && rpm2cpio "${rpm}" | cpio -idm --quiet)
+        found="$(find "${work}" -iname 'libargon2.so*' -type f | sort | tail -n1)"
+      fi
+    fi
+  elif command -v apt-get >/dev/null 2>&1; then
+    say "Fetching libargon2 via 'apt-get download' (no install, no /usr write)..."
+    if (cd "${work}" && apt-get download libargon2-1 >/dev/null 2>&1); then
+      local deb
+      deb="$(find "${work}" -maxdepth 1 -iname '*.deb' | head -n1)"
+      if [[ -n "${deb}" ]] && command -v dpkg-deb >/dev/null 2>&1; then
+        dpkg-deb -x "${deb}" "${work}/extracted"
+        found="$(find "${work}/extracted" -iname 'libargon2.so*' -type f | sort | tail -n1)"
+      fi
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    say "Fetching libargon2 via 'pacman -Sw' (cache-only, no install)..."
+    if sudo pacman -Sw --noconfirm --cachedir "${work}" argon2 >/dev/null 2>&1 \
+       || pacman -Sw --noconfirm --cachedir "${work}" argon2 >/dev/null 2>&1; then
+      local pkg
+      pkg="$(find "${work}" -maxdepth 1 -iname 'argon2-*.pkg.tar*' | head -n1)"
+      if [[ -n "${pkg}" ]] && command -v tar >/dev/null 2>&1; then
+        mkdir -p "${work}/extracted"
+        tar -xf "${pkg}" -C "${work}/extracted"
+        found="$(find "${work}/extracted" -iname 'libargon2.so*' -type f | sort | tail -n1)"
+      fi
+    fi
+  fi
+
+  if [[ -z "${found}" ]]; then
+    warn "Could not obtain libargon2 automatically (no dnf/apt/pacman download path succeeded)."
+    warn "Account creation will fail with 'DllNotFoundException: Could not load libargon2' until"
+    warn "you place a linux-x64 libargon2.so at ${native_dir}/libargon2.so yourself."
+    rm -rf "${work}"
+    return
+  fi
+
+  mkdir -p "${native_dir}"
+  cp -f "${found}" "${native_dir}/libargon2.so"
+  ln -sf libargon2.so "${native_dir}/libargon2.so.1"
+
+  # Also alongside the assembly itself, per ModernUO's own probing order.
+  cp -f "${found}" "${DIST_DIR}/libargon2.so"
+  ln -sf libargon2.so "${DIST_DIR}/libargon2.so.1"
+
+  rm -rf "${work}"
+  ok "Bundled libargon2 -> ${native_dir}/libargon2.so"
 }
 
 # ---------------------------------------------------------------------------
@@ -1773,6 +1902,7 @@ do_install() {
   install_dungeon_scripts
   install_map_editor
   build_modernuo
+  ensure_libargon2
   fix_felucca_season
   resolve_uo_data
   swap_t2a_map
@@ -1830,6 +1960,7 @@ do_update() {
   say "Forcing a rebuild against the updated source..."
   rm -f "${DIST_DIR}/ModernUO.dll"
   build_modernuo
+  ensure_libargon2
   fix_felucca_season
 
   if [[ "${cfg_backed_up}" == "1" ]]; then
