@@ -356,11 +356,11 @@ namespace Server.CustomBots
                 DoGrayTest(grayTok.Value, grayLinger);
             }
 
-            var thiefTok = ReadThiefRequest(out var thiefLinger, out var thiefTown);
+            var thiefTok = ReadThiefRequest(out var thiefLinger, out var thiefMode);
             if (thiefTok != null && thiefTok.Value != _lastThief)
             {
                 _lastThief = thiefTok.Value;
-                DoThiefTest(thiefTok.Value, thiefLinger, thiefTown);
+                DoThiefTest(thiefTok.Value, thiefLinger, thiefMode);
             }
 
             var bankTok = ReadLingerRequest(BankReq, out var bankLinger);
@@ -866,12 +866,12 @@ namespace Server.CustomBots
 
         // thief_request.txt: "token [linger] [town]" — does a thief bot
         // really pick pockets, and what happens to it when it is caught?
-        private static void DoThiefTest(long token, int linger, bool town)
+        private static void DoThiefTest(long token, int linger, int mode)
         {
             List<string> findings;
             try
             {
-                findings = BotThiefTest.Run(linger, town);
+                findings = BotThiefTest.Run(linger, mode);
             }
             catch (Exception ex)
             {
@@ -888,12 +888,12 @@ namespace Server.CustomBots
                 $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
         }
 
-        // "token [linger] [town]" — seconds to run, then 1 to stand the rig
-        // at a bank instead of out in the countryside.
-        private static long? ReadThiefRequest(out int linger, out bool town)
+        // "token [linger] [mode]" — seconds to run, then 0 countryside,
+        // 1 a bank, 2 a dungeon floor.
+        private static long? ReadThiefRequest(out int linger, out int mode)
         {
             linger = BotThiefTest.DefaultLinger;
-            town = false;
+            mode = 0;
             try
             {
                 if (!File.Exists(ThiefReq))
@@ -912,7 +912,7 @@ namespace Server.CustomBots
                 }
                 if (parts.Length > 2 && int.TryParse(parts[2], out var flag))
                 {
-                    town = flag != 0;
+                    mode = Math.Clamp(flag, 0, 2);
                 }
                 return t;
             }

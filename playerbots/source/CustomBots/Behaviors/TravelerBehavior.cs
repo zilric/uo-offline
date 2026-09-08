@@ -2857,6 +2857,19 @@ private bool ZoneArrival(PlayerBot bot, int fallbackRange)
                 return;
             }
 
+            // A thief does not crawl. It works the floor it landed on,
+            // hidden, and leaves by the stairs.
+            if (bot.Class == BotClass.Thief)
+            {
+                Log(bot, $"Teleported into a dungeon via '{DestinationName}' — a thief, going to work");
+                bot.Behavior = new ThiefBehavior
+                {
+                    InDungeon = true,
+                    VisitExpiresAt = Core.Now + TimeSpan.FromMinutes(Utility.RandomMinMax(6, 12)),
+                };
+                return;
+            }
+
             Log(bot, $"Teleported into a dungeon via '{DestinationName}' — becoming a crawler");
             bot.Behavior = new DungeonCrawlerBehavior();
         }

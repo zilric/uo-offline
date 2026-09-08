@@ -36,6 +36,13 @@
 // the bot is close and can see it, so the thief runs first and hides when
 // it has a gap. Once hidden it stays put until the flag lapses.
 //
+// Dungeons too. A thief that walks through a dungeon door goes to work
+// down there instead of becoming a crawler: it stays hidden as much as it
+// can, moves between the rooms on its floor looking for adventurers
+// between fights, and never fights anything. A monster that finds it gets
+// a getaway and a hide, not a dagger. After a lift it walks hidden to the
+// up-stairs and out, then to a bank.
+//
 // Loot goes to the bank after every lift. Stolen goods return to the
 // victim if the thief dies inside two minutes, so the thief walks to the
 // counter and puts each take in the box before trying again. The haul is
@@ -120,7 +127,7 @@ namespace Server.CustomBots
 
         // ---- State ----
 
-        private enum Mode { Prowl, Approach, Case, Getaway, Hidden, Fence }
+        private enum Mode { Prowl, Approach, Case, Getaway, Hidden, Fence, Roam, Exit }
 
         private Mode _mode = Mode.Prowl;
 
@@ -210,6 +217,42 @@ namespace Server.CustomBots
         // the edges of the crowd.
         private double _nerve = 1.0;
 
+        // ---- Dungeon mode ----
+
+        // Set by the Traveler at the door, or found on attach.
+        public bool InDungeon { get; set; }
+        private string _dungeonName = "";
+        private int _level;
+
+        // Wider look underground: rooms are big and marks are few.
+        private const int DungeonLookRange = 16;
+
+        // How far the thief will move its beat in one go.
+        private const int RoamMaxDist = 40;
+
+        // A route is only used when the graph is this close to both ends.
+        private const int RouteDriftMax = 20;
+        private const int HopRange = 2;
+        private static readonly TimeSpan RouteLimit = TimeSpan.FromSeconds(75);
+
+        // Odds a thief that just had to hide from a monster calls it a day.
+        private const double LeaveAfterScareChance = 0.40;
+
+        private DateTime _nextRoam;
+        private List<Point3D> _route;
+        private int _routeIndex;
+        private DateTime _routeStarted;
+        private int _followRange = 1;
+
+        // Exit bookkeeping: the pad being walked to, where the bot was last
+        // tick (a jump means the pad fired), how many floors climbed.
+        private Point3D _padTile;
+        private Point3D _lastPos;
+        private DateTime _padArrivedAt;
+        private int _exitTries;
+
+        private int Look => InDungeon ? DungeonLookRange : LookRange;
+
         public ThiefBehavior()
         {
             ChatCategories  = new[] { "thief_talk", "small_talk" };
@@ -228,6 +271,8 @@ namespace Server.CustomBots
             Mode.Getaway  => "getting away",
             Mode.Hidden   => "hiding with the flag on",
             Mode.Fence    => "banking the take",
+            Mode.Roam     => $"moving between rooms in {_dungeonName}",
+            Mode.Exit     => $"sneaking out of {_dungeonName} L{_level}",
             _             => null,
         };
 
@@ -235,6 +280,7 @@ namespace Server.CustomBots
         {
             Mode.Approach when _mark != null => _mark.Location,
             Mode.Fence => Home,
+            Mode.Roam or Mode.Exit when _route != null && _routeIndex < _route.Count => _route[_routeIndex],
             _ => null,
         };
 
@@ -276,6 +322,25 @@ namespace Server.CustomBots
             if (HasHaul(bot))
             {
                 _nextLook = Core.Now;
+            }
+
+            // Underground: find out where, and vanish.
+            if (InDungeon || DungeonRegistry.IsInDungeon(bot))
+            {
+                InDungeon = true;
+                var p = DungeonRegistry.NearestPointOnFloor(bot.Location, 30)
+                        ?? DungeonRegistry.NearestPoint(bot.Location, 30);
+                _dungeonName = string.IsNullOrEmpty(p?.Dungeon) ? "a dungeon" : p.Dungeon;
+                _level = p?.Level ?? 0;
+                _nextRoam = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(20, 50));
+                _lastPos = bot.Location;
+                if (CanSneak(bot))
+                {
+                    TrySneak(bot);
+                }
+                Console.WriteLine(
+                    $"[thief] {bot.Name} slips into {_dungeonName} L{_level}" +
+                    $"{(bot.Hidden ? " hidden" : "")}");
             }
         }
 
@@ -331,6 +396,8 @@ namespace Server.CustomBots
                 case Mode.Getaway:  TickGetaway(bot);  break;
                 case Mode.Hidden:   TickHidden(bot);   break;
                 case Mode.Fence:    TickFence(bot);    break;
+                case Mode.Roam:     TickRoam(bot);     break;
+                case Mode.Exit:     TickExit(bot);     break;
             }
         }
 
@@ -341,7 +408,16 @@ namespace Server.CustomBots
         {
             // The visit ends between marks, never mid-lift and never with
             // the flag on (a Traveler walking through town gray dies).
-            if (CheckVisitExpired(bot))
+            // Underground the way out is the stairs, not a Traveler.
+            if (InDungeon)
+            {
+                if (VisitExpiresAt != null && Core.Now >= VisitExpiresAt.Value)
+                {
+                    BeginExit(bot, "done here");
+                    return;
+                }
+            }
+            else if (CheckVisitExpired(bot))
             {
                 return;
             }
@@ -362,11 +438,22 @@ namespace Server.CustomBots
 
             if (FenceDue(bot))
             {
-                BeginFence(bot);
+                if (InDungeon)
+                {
+                    BeginExit(bot, "banking the take");
+                }
+                else
+                {
+                    BeginFence(bot);
+                }
                 return;
             }
 
             // Talking gives a hidden thief away.
+            if (InDungeon && bot.Hidden)
+            {
+                KeepStealth(bot);
+            }
             if (!bot.Hidden)
             {
                 TrySpeak(bot);
@@ -403,9 +490,20 @@ namespace Server.CustomBots
             var mark = PickMark(bot);
             if (mark == null)
             {
+                if (InDungeon && Core.Now >= _nextRoam)
+                {
+                    BeginRoam(bot);
+                }
                 return;
             }
 
+            TakeMark(bot, mark);
+        }
+
+        private void TakeMark(PlayerBot bot, Mobile mark)
+        {
+            _route     = null;
+            _followRange = 1;
             _mark      = mark;
             _markUntil = Core.Now + ApproachLimit;
             _mode      = Mode.Approach;
@@ -513,7 +611,7 @@ namespace Server.CustomBots
                 region = null;
             }
 
-            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, LookRange))
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, Look))
             {
                 if (!IsMark(bot, m))
                 {
@@ -700,7 +798,7 @@ namespace Server.CustomBots
             if (_mark.Map != bot.Map) return "it left the map";
             if (_mark.Hidden) return "it hid";
             if (!bot.CanSee(_mark)) return "cannot see it";
-            if (!bot.InRange(_mark.Location, LookRange + 8)) return "it got away";
+            if (!bot.InRange(_mark.Location, Look + 8)) return "it got away";
             if (!(_mark.Backpack?.Items.Count > 0)) return "its pack is empty";
             return null;
         }
@@ -1247,6 +1345,14 @@ namespace Server.CustomBots
                 return;
             }
 
+            // Underground the thing that was after it was a monster, and a
+            // hidden thief is a thief it cannot find. Stay hidden.
+            if (InDungeon && CanSneak(bot))
+            {
+                EndGetaway(bot, "lost it");
+                return;
+            }
+
             // Flag lapsed. Stand up.
             bot.RevealingAction();
             EndGetaway(bot, "flag lapsed");
@@ -1258,6 +1364,22 @@ namespace Server.CustomBots
             Console.WriteLine(
                 $"[thief] {bot.Name} {how} at {BotEventJournal.PlaceName(bot.Location, bot.Map)}");
 
+            if (InDungeon)
+            {
+                // Some scares are enough for one trip.
+                if (Utility.RandomDouble() < LeaveAfterScareChance)
+                {
+                    BeginExit(bot, "had enough");
+                    return;
+                }
+                Home = bot.Location;
+                HomeMap = bot.Map;
+                _mode = Mode.Prowl;
+                _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(6, 20));
+                _nextRoam = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(10, 30));
+                return;
+            }
+
             // Half the time the thief has had enough of this town.
             if (Utility.RandomDouble() < 0.5 || (bot.Map == HomeMap && !bot.InRange(Home, 40)))
             {
@@ -1267,6 +1389,310 @@ namespace Server.CustomBots
 
             _mode = Mode.Prowl;
             _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(20, 60));
+        }
+
+        // -------------------------------------------------------------------
+        // Dungeon roaming: move the beat to another room on this floor,
+        // along the waypoint graph, hidden.
+        // -------------------------------------------------------------------
+        private void BeginRoam(PlayerBot bot)
+        {
+            _nextRoam = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(45, 90));
+
+            var pts = DungeonRegistry.ReachablePoints(bot.Location);
+            if (pts.Count == 0)
+            {
+                pts = DungeonRegistry.PointsFor(_dungeonName, _level);
+            }
+
+            var picks = new List<BotDestination>();
+            foreach (var d in pts)
+            {
+                if (d.Type != DestinationType.DungeonRoom)
+                {
+                    continue;
+                }
+                int dist = Cheb(bot.Location, d.Location);
+                if (dist < 6 || dist > RoamMaxDist)
+                {
+                    continue;
+                }
+                picks.Add(d);
+            }
+            if (picks.Count == 0)
+            {
+                return;
+            }
+
+            var target = picks[Utility.Random(picks.Count)];
+            if (!PlanRoute(bot, target.Location))
+            {
+                return;
+            }
+
+            if (CanSneak(bot) && !bot.Hidden)
+            {
+                TrySneak(bot);
+            }
+            _mode = Mode.Roam;
+            _routeStarted = Core.Now;
+            if (Verbose)
+            {
+                Console.WriteLine($"[thief] {bot.Name} moves the beat to '{target.Name}'");
+            }
+        }
+
+        private void TickRoam(PlayerBot bot)
+        {
+            // Somebody worth robbing on the way.
+            if (Core.Now >= _nextLook && Core.TickCount - bot.NextSkillTime >= 0)
+            {
+                _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(4, 10));
+                var mark = PickMark(bot);
+                if (mark != null)
+                {
+                    StopStepTimer();
+                    _follower = null;
+                    TakeMark(bot, mark);
+                    return;
+                }
+            }
+
+            if (Core.Now - _routeStarted > RouteLimit)
+            {
+                EndRoam(bot);
+                return;
+            }
+
+            if (WalkRoute(bot, HopRange))
+            {
+                EndRoam(bot);
+            }
+        }
+
+        private void EndRoam(PlayerBot bot)
+        {
+            StopStepTimer();
+            _follower = null;
+            _route = null;
+            Home = bot.Location;
+            HomeMap = bot.Map;
+            _mode = Mode.Prowl;
+            _nextLook = Core.Now + TimeSpan.FromSeconds(Utility.RandomMinMax(2, 6));
+        }
+
+        // -------------------------------------------------------------------
+        // Dungeon exit: walk hidden to this floor's up-stairs. The pad
+        // teleports the bot; a jump in position is how the tick knows. On
+        // a higher floor it does it again; on the surface it heads for the
+        // bank. No stairs known, or the walk keeps failing, and the crawler's
+        // exit machinery (which knows the mislabeled stairs) carries it out.
+        // -------------------------------------------------------------------
+        private void BeginExit(PlayerBot bot, string why)
+        {
+            StopStepTimer();
+            _follower = null;
+            _mark = null;
+            _slipTo = null;
+            _route = null;
+
+            var pad = NearestPad(bot, DestinationType.DungeonAscend);
+            if (pad == null || _exitTries >= 4 || !PlanRoute(bot, pad.Location))
+            {
+                FallbackExit(bot, why);
+                return;
+            }
+
+            _exitTries++;
+            _padTile = pad.Location;
+            _lastPos = bot.Location;
+            _padArrivedAt = DateTime.MinValue;
+            _routeStarted = Core.Now;
+            _mode = Mode.Exit;
+            if (CanSneak(bot) && !bot.Hidden)
+            {
+                TrySneak(bot);
+            }
+            Console.WriteLine(
+                $"[thief] {bot.Name} heading out of {_dungeonName} L{_level} ({why})");
+        }
+
+        private void TickExit(PlayerBot bot)
+        {
+            // The pad fired: the bot is somewhere else now.
+            if (Cheb(bot.Location, _lastPos) > 15)
+            {
+                OnLanded(bot);
+                return;
+            }
+            _lastPos = bot.Location;
+
+            if (Core.Now - _routeStarted > RouteLimit + RouteLimit)
+            {
+                FallbackExit(bot, "the walk to the stairs took too long");
+                return;
+            }
+
+            if (WalkRoute(bot, 0))
+            {
+                // Standing on the pad tile and nothing happened yet. Give
+                // it a few beats, then let the crawler's pad walk sort it.
+                if (_padArrivedAt == DateTime.MinValue)
+                {
+                    _padArrivedAt = Core.Now;
+                }
+                else if (Core.Now - _padArrivedAt > TimeSpan.FromSeconds(8))
+                {
+                    FallbackExit(bot, "the stairs did not take");
+                }
+            }
+        }
+
+        private void OnLanded(PlayerBot bot)
+        {
+            StopStepTimer();
+            _follower = null;
+            _route = null;
+
+            if (DungeonRegistry.IsInDungeon(bot))
+            {
+                var p = DungeonRegistry.NearestPointOnFloor(bot.Location, 30)
+                        ?? DungeonRegistry.NearestPoint(bot.Location, 30);
+                _dungeonName = string.IsNullOrEmpty(p?.Dungeon) ? _dungeonName : p.Dungeon;
+                _level = p?.Level ?? _level;
+                BeginExit(bot, $"climbing on from L{_level}");
+                return;
+            }
+
+            Console.WriteLine($"[thief] {bot.Name} made it out of {_dungeonName}");
+            InDungeon = false;
+            _exitTries = 0;
+            if (HasHaul(bot))
+            {
+                BeginFence(bot);
+                return;
+            }
+            bot.Behavior = RedTerritory.TravelBrain(bot);
+        }
+
+        private void FallbackExit(PlayerBot bot, string why)
+        {
+            Console.WriteLine(
+                $"[thief] {bot.Name} lets the crawler's exit carry it out of " +
+                $"{_dungeonName} L{_level} ({why})");
+            var crawler = new DungeonCrawlerBehavior();
+            bot.Behavior = crawler;
+            crawler.ExitNow();
+        }
+
+        private static BotDestination NearestPad(PlayerBot bot, DestinationType type)
+        {
+            var pts = DungeonRegistry.ReachablePoints(bot.Location);
+            BotDestination best = null;
+            int bestDist = int.MaxValue;
+            foreach (var d in pts)
+            {
+                if (d.Type != type)
+                {
+                    continue;
+                }
+                int dist = Cheb(bot.Location, d.Location);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = d;
+                }
+            }
+            return best;
+        }
+
+        // Same route planner the crawler uses: graph path between the
+        // nearest nodes, then the target itself as the last hop.
+        private bool PlanRoute(PlayerBot bot, Point3D target)
+        {
+            _route = null;
+            _routeIndex = 0;
+
+            var graph = WaypointRegistry.Graph;
+            if (graph == null || graph.NodeCount == 0)
+            {
+                return false;
+            }
+
+            var start = graph.FindNearestNode(bot.Location);
+            var end   = graph.FindNearestNode(target);
+            if (start == null || end == null)
+            {
+                return false;
+            }
+            if (Cheb(bot.Location, start.Location) > RouteDriftMax ||
+                Cheb(target, end.Location) > RouteDriftMax)
+            {
+                return false;
+            }
+
+            var names = graph.FindPath(start.Name, end.Name);
+            if (names == null || names.Count == 0)
+            {
+                return false;
+            }
+
+            var route = new List<Point3D>(names.Count + 1);
+            foreach (var name in names)
+            {
+                var node = graph.Get(name);
+                if (node != null)
+                {
+                    route.Add(node.Location);
+                }
+            }
+            route.Add(target);
+
+            _route = route;
+            _routeIndex = 0;
+            while (_routeIndex < route.Count - 1 &&
+                   Cheb(bot.Location, route[_routeIndex]) <= HopRange)
+            {
+                _routeIndex++;
+            }
+            _follower = null;
+            return true;
+        }
+
+        // One tick of route walking. True when the last hop is reached.
+        private bool WalkRoute(PlayerBot bot, int lastRange)
+        {
+            if (_route == null || _routeIndex >= _route.Count)
+            {
+                return true;
+            }
+
+            bool last = _routeIndex == _route.Count - 1;
+            var hop = _route[_routeIndex];
+            int range = last ? lastRange : HopRange;
+
+            if (Cheb(bot.Location, hop) <= range)
+            {
+                if (last)
+                {
+                    StopStepTimer();
+                    return true;
+                }
+                _routeIndex++;
+                _follower = null;
+                return false;
+            }
+
+            _followRange = last ? lastRange : 1;
+            WalkTo(bot, hop, run: !bot.Hidden);
+            return false;
+        }
+
+        private static int Cheb(Point3D a, Point3D b)
+        {
+            int dx = Math.Abs(a.X - b.X);
+            int dy = Math.Abs(a.Y - b.Y);
+            return dx > dy ? dx : dy;
         }
 
         // Anyone in range who is fighting this bot.
@@ -1591,16 +2017,19 @@ namespace Server.CustomBots
 
                 case Mode.Approach:
                 case Mode.Prowl:
+                case Mode.Roam:
+                case Mode.Exit:
                     if (_follower == null)
                     {
                         StopStepTimer();
                         return;
                     }
-                    if (_sneaking || (_slipTo != null && bot.Hidden))
+                    if (bot.Hidden)
                     {
                         KeepStealth(bot);
                     }
-                    if (_follower.Follow(_running && !bot.Hidden, 1))
+                    int range = _mode is Mode.Roam or Mode.Exit ? _followRange : 1;
+                    if (_follower.Follow(_running && !bot.Hidden, range))
                     {
                         StopStepTimer();
                     }

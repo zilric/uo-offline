@@ -12,8 +12,9 @@
 // rig at the Britain bank instead, which is the whole 1999 experience:
 // steal under the banker's nose and see how long you last.
 //
-//   [TestThief [linger] [town]   — run it, results to the caller + console.
-//   thief_request.txt            — headless: "token [linger] [town]"
+//   [TestThief [linger] [mode]   — run it, results to the caller + console.
+//                                  mode 0 countryside, 1 town, 2 dungeon.
+//   thief_request.txt            — headless: "token [linger] [mode]"
 //                                  -> thief_ack.json, tally on the console
 //                                  as "[TestThief] RESULT ..." when it ends.
 // =========================================================================
@@ -50,20 +51,35 @@ namespace Server.CustomBots
         private static void OnCommand(CommandEventArgs e)
         {
             var linger = e.Length > 0 ? Math.Clamp(e.GetInt32(0), 0, 600) : DefaultLinger;
-            var town = e.Length > 1 && e.GetInt32(1) != 0;
-            foreach (var line in Run(linger, town))
+            var mode = e.Length > 1 ? e.GetInt32(1) : 0;
+            foreach (var line in Run(linger, mode))
             {
                 e.Mobile.SendMessage(line.StartsWith("FAIL") ? 0x22 : 0x3F, line);
             }
         }
 
-        public static List<string> Run(int lingerSeconds = DefaultLinger, bool town = false)
+        public static List<string> Run(int lingerSeconds = DefaultLinger, bool town = false) =>
+            Run(lingerSeconds, town ? 1 : 0);
+
+        public static List<string> Run(int lingerSeconds, int mode)
         {
             var findings = new List<string>();
+            bool town = mode == 1;
+            bool dungeon = mode == 2;
 
             Point3D spot;
             Map map = Map.Felucca;
-            if (town)
+            if (dungeon)
+            {
+                var room = FindDungeonRoom();
+                if (room == null)
+                {
+                    findings.Add("FAIL no first-floor dungeon room in the catalog");
+                    return Report(findings);
+                }
+                spot = room.Location;
+            }
+            else if (town)
             {
                 var bank = FindBank();
                 if (bank == null)
@@ -102,7 +118,7 @@ namespace Server.CustomBots
             int liftsBefore    = ThiefBehavior.TotalLifts;
             int caughtBefore   = ThiefBehavior.TotalCaught;
 
-            thief.Behavior = new ThiefBehavior { Fearless = town };
+            thief.Behavior = new ThiefBehavior { Fearless = town, InDungeon = dungeon };
 
             var place = BotEventJournal.PlaceName(spot, map);
             findings.Add(
@@ -113,7 +129,7 @@ namespace Server.CustomBots
                 $"hands={(thief.FindItemOnLayer(Layer.OneHanded) == null && thief.FindItemOnLayer(Layer.TwoHanded) == null ? "free" : "FULL")}");
             findings.Add(
                 $"OK   two marks with 400gp, 30 pearls, a gem and bandages each at {place} " +
-                $"({(town ? "in town" : "countryside")}, crowd={CountCrowd(thief)})");
+                $"({(dungeon ? "in a dungeon" : town ? "in town" : "countryside")}, crowd={CountCrowd(thief)})");
 
             if (lingerSeconds <= 0)
             {
@@ -193,6 +209,27 @@ namespace Server.CustomBots
             int z = map.GetAverageZ(x, y);
             var candidate = new Point3D(x, y, z);
             return map.CanSpawnMobile(candidate) ? candidate : p;
+        }
+
+        // A first-floor room in Despise if there is one, else any first
+        // floor room with a waypoint route to an up-stairs.
+        private static BotDestination FindDungeonRoom()
+        {
+            BotDestination any = null;
+            foreach (var d in DestinationCatalog.All)
+            {
+                if (d.Type != DestinationType.DungeonRoom || d.Level != 1 ||
+                    string.IsNullOrEmpty(d.Dungeon))
+                {
+                    continue;
+                }
+                any ??= d;
+                if (d.Dungeon.StartsWith("Despise", StringComparison.OrdinalIgnoreCase))
+                {
+                    return d;
+                }
+            }
+            return any;
         }
 
         private static BotDestination FindBank()

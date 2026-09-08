@@ -73,6 +73,18 @@ namespace Server.CustomBots
         // Exit-mode: seek this level's up-teleporter and climb out.
         public bool ExitMode { get; private set; }
 
+        // Start in exit mode. A thief with no stairs it can route to hands
+        // itself to a crawler this way and lets the exit machinery, which
+        // knows the mislabeled stairs and the watchdog, carry it out.
+        public void ExitNow()
+        {
+            ExitMode = true;
+            _exitModeSince = Core.Now;
+            _lingering = false;
+            _route = null;
+            _targetPoint = null;
+        }
+
         // Camper: farms the first room it reaches for the whole run
         // instead of sweeping the floor. Rolled once per crawl.
         public bool Camper { get; private set; }
