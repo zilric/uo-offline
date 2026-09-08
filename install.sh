@@ -49,6 +49,24 @@ for _arg_i in $(seq 1 $#); do
     INSTALL_ROOT="${!_arg_i#*=}"
   elif [[ "${!_arg_i}" == "--no-map-editor" ]]; then
     INSTALL_MAP_EDITOR=0
+  # Playing with friends (docs/FRIENDS.md):
+  #   --host                  this PC is the server; friends connect to it
+  #   --join ADDRESS          client only, connects to a friend's PC
+  #   --user NAME --pass PW   the account to use when joining
+  elif [[ "${!_arg_i}" == "--host" ]]; then
+    PLAY_MODE="host"
+  elif [[ "${!_arg_i}" == "--join" ]]; then
+    _next=$((_arg_i + 1)); PLAY_MODE="join"; JOIN_ADDRESS="${!_next:-}"
+  elif [[ "${!_arg_i}" == --join=* ]]; then
+    PLAY_MODE="join"; JOIN_ADDRESS="${!_arg_i#*=}"
+  elif [[ "${!_arg_i}" == "--user" ]]; then
+    _next=$((_arg_i + 1)); LOGIN_USER="${!_next:-}"
+  elif [[ "${!_arg_i}" == --user=* ]]; then
+    LOGIN_USER="${!_arg_i#*=}"
+  elif [[ "${!_arg_i}" == "--pass" ]]; then
+    _next=$((_arg_i + 1)); LOGIN_PASS="${!_next:-}"
+  elif [[ "${!_arg_i}" == --pass=* ]]; then
+    LOGIN_PASS="${!_arg_i#*=}"
   fi
 done
 
@@ -56,6 +74,12 @@ done
 # bots - not something you need in order to play. On by default, off with
 # --no-map-editor or INSTALL_MAP_EDITOR=0.
 INSTALL_MAP_EDITOR="${INSTALL_MAP_EDITOR:-1}"
+PLAY_MODE="${PLAY_MODE:-solo}"
+JOIN_ADDRESS="${JOIN_ADDRESS:-}"
+if [[ "${PLAY_MODE}" == "join" ]] && [[ -z "${JOIN_ADDRESS}" ]]; then
+  echo "--join needs your friend's address (friends.sh on their PC shows it)." >&2
+  exit 1
+fi
 unset _arg_i _next
 
 INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/uo-modernuo}"
@@ -112,7 +136,11 @@ EXPANSION_ID=1
 EXPANSION_NAME="T2A"
 OWNER_USER="admin"
 OWNER_PASS="admin"
-LISTEN_ADDR="127.0.0.1:2593"
+# Hosting binds every network this PC is on; friends still need TCP 2593
+# open in any local firewall (friends.sh says how).
+if [[ "${PLAY_MODE}" == "host" ]]; then LISTEN_ADDR="0.0.0.0:2593"; else LISTEN_ADDR="127.0.0.1:2593"; fi
+LOGIN_USER="${LOGIN_USER:-${OWNER_USER}}"
+LOGIN_PASS="${LOGIN_PASS:-}"
 SHARD_NAME="UO Offline"
 
 # Per-user .NET install location. Avoids needing root and survives SteamOS
@@ -861,8 +889,7 @@ write_modernuo_config() {
     "accountHandler.maxAccountsPerIP": "10",
     "autosave.enabled": "true",
     "autosave.saveDelay": "00:05:00",
-    "serverList.address": "127.0.0.1",
-    "serverList.autoDetect": "false",
+    "serverListing.autoDetect": "false",
     "serverListing.name": "${RESOLVED_SHARD_NAME}",
     "serverListing.serverName": "${RESOLVED_SHARD_NAME}",
     "accountHandler.enableAutoAccountCreation": "True",
@@ -993,12 +1020,16 @@ write_classicuo_settings() {
     cfg_targets+=("${nested}")
   fi
 
+  # Joining a friend points the client at their PC and remembers the login.
+  local client_ip="127.0.0.1" save_pw="false"
+  if [[ "${PLAY_MODE}" == "join" ]]; then client_ip="${JOIN_ADDRESS}"; save_pw="true"; fi
+
   for target in "${cfg_targets[@]}"; do
     cat > "${target}/settings.json" <<EOF
 {
-  "username": "${OWNER_USER}",
-  "password": "",
-  "ip": "127.0.0.1",
+  "username": "${LOGIN_USER}",
+  "password": "${LOGIN_PASS}",
+  "ip": "${client_ip}",
   "port": 2593,
   "ultimaonlinedirectory": "${UO_DATA}",
   "clientversion": "${UO_DATA_VERSION}",
@@ -1007,7 +1038,7 @@ write_classicuo_settings() {
   "fps": 60,
   "debug": false,
   "encryption": 0,
-  "save_password": false,
+  "save_password": ${save_pw},
   "auto_login": false,
   "plugins": [],
   "music_volume": 30,
@@ -1021,6 +1052,8 @@ write_classicuo_settings() {
 EOF
     ok "Wrote ${target}/settings.json"
   done
+  [[ "${PLAY_MODE}" == "join" ]] && ok "The game will connect to ${JOIN_ADDRESS} as ${LOGIN_USER}."
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1068,23 @@ install_runtime_scripts() {
   cp "${src_dir}/start.sh"              "${INSTALL_ROOT}/start.sh"
   cp "${src_dir}/stop.sh"               "${INSTALL_ROOT}/stop.sh"
   cp "${src_dir}/reset-first-launch.sh" "${INSTALL_ROOT}/reset-first-launch.sh"
+  if [[ -f "${src_dir}/friends.sh" ]]; then
+    cp "${src_dir}/friends.sh" "${INSTALL_ROOT}/friends.sh"
+    chmod +x "${INSTALL_ROOT}/friends.sh"
+    ok "Installed friends.sh"
+  fi
+
+  # play.json - what start.sh does when run. friends.sh rewrites it.
+  local play_addr="127.0.0.1"
+  [[ "${PLAY_MODE}" == "join" ]] && play_addr="${JOIN_ADDRESS}"
+  cat > "${INSTALL_ROOT}/play.json" <<EOF
+{
+  "mode": "${PLAY_MODE}",
+  "address": "${play_addr}",
+  "port": 2593
+}
+EOF
+  ok "Wrote play.json (mode: ${PLAY_MODE})"
 
   # The launcher's update checker is optional - an install without it just
   # never offers updates, which is the quiet way to fail.
@@ -1413,6 +1463,20 @@ install_playerbots() {
 
 # ---------------------------------------------------------------------------
 main() {
+  if [[ "${PLAY_MODE}" == "join" ]]; then
+    # Client only: no server is built here, the game connects to a friend.
+    preflight
+    install_deps
+    bootstrap_dotnet
+    find_or_download_uo_data
+    swap_t2a_map
+    install_classicuo
+    write_classicuo_settings
+    install_runtime_scripts
+    install_desktop_entry
+    finish
+    return
+  fi
   preflight
   install_deps
   fetch_modernuo

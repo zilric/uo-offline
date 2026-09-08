@@ -4,7 +4,9 @@
 # A friendly wizard around the same install engine as install.ps1 (which is
 # dot-sourced with -NoRun and driven step by step). Three screens:
 #
-#   1. Welcome  — what will happen, two options, one big Install button.
+#   1. Welcome  — what will happen, the options, how you will play (by
+#                 yourself, hosting friends, or joining one), one big Install
+#                 button.
 #   2. Progress — a checklist of every step with live status + a log.
 #   3. Done     — Play Now / Close (or the error, if something failed).
 #
@@ -85,12 +87,12 @@ $panelWelcome.Controls.Add((NewLabel "Ultima Online — Offline" 40 32 740 44 $f
 $panelWelcome.Controls.Add((NewLabel "A complete single-player UO shard on your own PC. No accounts, no internet after install." 42 82 740 24 $fontBody $colDim))
 
 $introBox = New-Object System.Windows.Forms.Panel
-$introBox.Location = New-Object System.Drawing.Point(40, 120)
-$introBox.Size     = New-Object System.Drawing.Size(740, 240)
+$introBox.Location = New-Object System.Drawing.Point(40, 112)
+$introBox.Size     = New-Object System.Drawing.Size(740, 196)
 $introBox.BackColor = $colPanel
 $panelWelcome.Controls.Add($introBox)
 
-$introBox.Controls.Add((NewLabel "This installer will:" 20 16 690 24 $fontHead $colText))
+$introBox.Controls.Add((NewLabel "This installer will:" 20 10 690 24 $fontHead $colText))
 $introSteps = @(
     "1.  Build the game server — with the living world of player-like bots compiled in",
     "2.  Download the ClassicUO game client and the Razor assistant (macros and hotkeys)",
@@ -98,24 +100,24 @@ $introSteps = @(
     "4.  Configure everything for offline play on this PC only",
     "5.  Put a `"UO Offline`" shortcut on your desktop — one click starts the server and takes you in-game with Razor attached"
 )
-$yy = 48
+$yy = 38
 foreach ($s in $introSteps) {
-    $introBox.Controls.Add((NewLabel $s 28 $yy 690 ([int](24 * [Math]::Ceiling($s.Length / 95.0))) $fontBody $colText))
-    $yy += [int](26 * [Math]::Ceiling($s.Length / 95.0))
+    $introBox.Controls.Add((NewLabel $s 28 $yy 690 ([int](22 * [Math]::Ceiling($s.Length / 95.0))) $fontBody $colText))
+    $yy += [int](24 * [Math]::Ceiling($s.Length / 95.0))
 }
-$introBox.Controls.Add((NewLabel "Takes 15–25 minutes depending on your connection. Safe to re-run — finished steps are skipped." 28 ($yy + 6) 690 24 $fontBody $colDim))
+$introBox.Controls.Add((NewLabel "Takes 15–25 minutes depending on your connection. Safe to re-run — finished steps are skipped." 28 ($yy + 2) 690 22 $fontBody $colDim))
 
 $optBox = New-Object System.Windows.Forms.Panel
-$optBox.Location = New-Object System.Drawing.Point(40, 376)
-$optBox.Size     = New-Object System.Drawing.Size(740, 138)
+$optBox.Location = New-Object System.Drawing.Point(40, 316)
+$optBox.Size     = New-Object System.Drawing.Size(740, 112)
 $optBox.BackColor = $colPanel
 $panelWelcome.Controls.Add($optBox)
-$optBox.Controls.Add((NewLabel "Options" 20 12 300 24 $fontHead $colText))
+$optBox.Controls.Add((NewLabel "Options" 20 8 300 24 $fontHead $colText))
 
 $chkT2A = New-Object System.Windows.Forms.CheckBox
 $chkT2A.Text = "Install the authentic T2A-era world map (recommended — pre-destruction Magincia)"
 $chkT2A.Checked = $true
-$chkT2A.Location = New-Object System.Drawing.Point(28, 42)
+$chkT2A.Location = New-Object System.Drawing.Point(28, 32)
 $chkT2A.Size = New-Object System.Drawing.Size(690, 24)
 $chkT2A.Font = $fontBody; $chkT2A.ForeColor = $colText
 $optBox.Controls.Add($chkT2A)
@@ -123,7 +125,7 @@ $optBox.Controls.Add($chkT2A)
 $chkRazor = New-Object System.Windows.Forms.CheckBox
 $chkRazor.Text = "Install the Razor assistant (recommended — loads inside the game client)"
 $chkRazor.Checked = $true
-$chkRazor.Location = New-Object System.Drawing.Point(28, 70)
+$chkRazor.Location = New-Object System.Drawing.Point(28, 56)
 $chkRazor.Size = New-Object System.Drawing.Size(690, 24)
 $chkRazor.Font = $fontBody; $chkRazor.ForeColor = $colText
 $optBox.Controls.Add($chkRazor)
@@ -131,18 +133,74 @@ $optBox.Controls.Add($chkRazor)
 $chkMap = New-Object System.Windows.Forms.CheckBox
 $chkMap.Text = "Install the map editor (waypoints, spawns and a live view of every bot)"
 $chkMap.Checked = $true
-$chkMap.Location = New-Object System.Drawing.Point(28, 98)
+$chkMap.Location = New-Object System.Drawing.Point(28, 80)
 $chkMap.Size = New-Object System.Drawing.Size(690, 24)
 $chkMap.Font = $fontBody; $chkMap.ForeColor = $colText
 $optBox.Controls.Add($chkMap)
 
-$panelWelcome.Controls.Add((NewLabel "Installs to:" 42 549 78 22 $fontBody $colDim))
+# ---- How will you play? ----
+# By yourself is the old install. Hosting builds the same thing but opens
+# the server to friends. Joining builds only the client and points it at a
+# friend's PC. friends.bat in the install folder switches between them later.
+$playBox = New-Object System.Windows.Forms.Panel
+$playBox.Location = New-Object System.Drawing.Point(40, 436)
+$playBox.Size     = New-Object System.Drawing.Size(740, 100)
+$playBox.BackColor = $colPanel
+$panelWelcome.Controls.Add($playBox)
+$playBox.Controls.Add((NewLabel "How will you play?" 20 8 300 24 $fontHead $colText))
+
+function NewRadio($text, $x, $y, $w) {
+    $r = New-Object System.Windows.Forms.RadioButton
+    $r.Text = $text; $r.Location = New-Object System.Drawing.Point($x, $y)
+    $r.Size = New-Object System.Drawing.Size($w, 24)
+    $r.Font = $fontBody; $r.ForeColor = $colText
+    return $r
+}
+$radSolo = NewRadio "By myself (this PC only)" 28 34 210
+$radHost = NewRadio "Host for friends (they connect to me)" 244 34 290
+$radJoin = NewRadio "Join a friend (client only)" 538 34 196
+$radSolo.Checked = $true
+$playBox.Controls.Add($radSolo); $playBox.Controls.Add($radHost); $playBox.Controls.Add($radJoin)
+
+$lblJoinAddr = NewLabel "Friend's address:" 28 66 118 22 $fontBody $colDim
+$txtJoinAddr = New-Object System.Windows.Forms.TextBox
+$txtJoinAddr.Location = New-Object System.Drawing.Point(146, 63)
+$txtJoinAddr.Size = New-Object System.Drawing.Size(180, 24)
+$txtJoinAddr.Font = $fontBody; $txtJoinAddr.BackColor = $colBack; $txtJoinAddr.ForeColor = $colText; $txtJoinAddr.BorderStyle = "FixedSingle"
+$lblJoinUser = NewLabel "Your name:" 340 66 82 22 $fontBody $colDim
+$txtJoinUser = New-Object System.Windows.Forms.TextBox
+$txtJoinUser.Text = $env:USERNAME
+$txtJoinUser.Location = New-Object System.Drawing.Point(422, 63)
+$txtJoinUser.Size = New-Object System.Drawing.Size(120, 24)
+$txtJoinUser.Font = $fontBody; $txtJoinUser.BackColor = $colBack; $txtJoinUser.ForeColor = $colText; $txtJoinUser.BorderStyle = "FixedSingle"
+$lblJoinPass = NewLabel "Password:" 552 66 74 22 $fontBody $colDim
+$txtJoinPass = New-Object System.Windows.Forms.TextBox
+$txtJoinPass.Location = New-Object System.Drawing.Point(626, 63)
+$txtJoinPass.Size = New-Object System.Drawing.Size(100, 24)
+$txtJoinPass.Font = $fontBody; $txtJoinPass.BackColor = $colBack; $txtJoinPass.ForeColor = $colText; $txtJoinPass.BorderStyle = "FixedSingle"
+$txtJoinPass.UseSystemPasswordChar = $true
+$lblHostNote = NewLabel "Hosting asks once (a Windows prompt) to open port 2593 in the firewall. Friends on your LAN or on Tailscale can then join." 28 66 700 22 $fontBody $colDim
+$lblHostNote.Visible = $false
+foreach ($c in @($lblJoinAddr, $txtJoinAddr, $lblJoinUser, $txtJoinUser, $lblJoinPass, $txtJoinPass)) { $c.Visible = $false; $playBox.Controls.Add($c) }
+$playBox.Controls.Add($lblHostNote)
+
+$syncPlayUi = {
+    $join = $radJoin.Checked
+    foreach ($c in @($lblJoinAddr, $txtJoinAddr, $lblJoinUser, $txtJoinUser, $lblJoinPass, $txtJoinPass)) { $c.Visible = $join }
+    $lblHostNote.Visible = $radHost.Checked
+    # A join install has no server, so the server-side options mean nothing.
+    $chkMap.Enabled = -not $join
+    $btnInstall.Text = if ($join) { "Install client" } else { "Install" }
+}
+$radSolo.Add_CheckedChanged($syncPlayUi); $radHost.Add_CheckedChanged($syncPlayUi); $radJoin.Add_CheckedChanged($syncPlayUi)
+
+$panelWelcome.Controls.Add((NewLabel "Installs to:" 42 553 78 22 $fontBody $colDim))
 
 # Editable on purpose: Change... is the easy path, but typing a path directly
 # is quicker if you already know where it goes.
 $txtPath = New-Object System.Windows.Forms.TextBox
 $txtPath.Text = $InstallRootLabel
-$txtPath.Location = New-Object System.Drawing.Point(124, 546)
+$txtPath.Location = New-Object System.Drawing.Point(124, 550)
 $txtPath.Size = New-Object System.Drawing.Size(310, 26)
 $txtPath.Font = $fontBody
 $txtPath.BackColor = $colPanel; $txtPath.ForeColor = $colText
@@ -151,7 +209,7 @@ $panelWelcome.Controls.Add($txtPath)
 
 $btnBrowse = New-Object System.Windows.Forms.Button
 $btnBrowse.Text = "Change..."
-$btnBrowse.Location = New-Object System.Drawing.Point(444, 544)
+$btnBrowse.Location = New-Object System.Drawing.Point(444, 548)
 $btnBrowse.Size = New-Object System.Drawing.Size(100, 30)
 $btnBrowse.Font = $fontBody
 $btnBrowse.BackColor = $colPanel; $btnBrowse.ForeColor = $colText; $btnBrowse.FlatStyle = "Flat"
@@ -175,7 +233,7 @@ $panelWelcome.Controls.Add($btnBrowse)
 
 $btnInstall = New-Object System.Windows.Forms.Button
 $btnInstall.Text = "Install"
-$btnInstall.Location = New-Object System.Drawing.Point(600, 576)
+$btnInstall.Location = New-Object System.Drawing.Point(600, 590)
 $btnInstall.Size = New-Object System.Drawing.Size(180, 44)
 $btnInstall.Font = $fontHead
 $btnInstall.BackColor = $colGold
@@ -185,12 +243,13 @@ $panelWelcome.Controls.Add($btnInstall)
 
 $btnQuit = New-Object System.Windows.Forms.Button
 $btnQuit.Text = "Cancel"
-$btnQuit.Location = New-Object System.Drawing.Point(470, 576)
+$btnQuit.Location = New-Object System.Drawing.Point(470, 590)
 $btnQuit.Size = New-Object System.Drawing.Size(115, 44)
 $btnQuit.Font = $fontBody
 $btnQuit.BackColor = $colPanel; $btnQuit.ForeColor = $colText; $btnQuit.FlatStyle = "Flat"
 $btnQuit.Add_Click({ $form.Close() })
 $panelWelcome.Controls.Add($btnQuit)
+& $syncPlayUi
 
 # ---------------------------------------------------------------------------
 # Screen 2 — Progress (checklist + log)
@@ -306,7 +365,7 @@ $form.Controls.Add($panelDone)
 $script:ps = $null
 $script:rs = $null
 
-function StartWorker($optT2A, $optRazor, $optMap, $installPath) {
+function StartWorker($optT2A, $optRazor, $optMap, $installPath, $playMode, $joinAddr, $joinUser, $joinPass) {
     $script:rs = [runspacefactory]::CreateRunspace()
     $script:rs.Open()
     $script:rs.SessionStateProxy.SetVariable('sync',       $sync)
@@ -315,6 +374,10 @@ function StartWorker($optT2A, $optRazor, $optMap, $installPath) {
     $script:rs.SessionStateProxy.SetVariable('OptRazor',   $optRazor)
     $script:rs.SessionStateProxy.SetVariable('OptMap',     $optMap)
     $script:rs.SessionStateProxy.SetVariable('InstallChoice', $installPath)
+    $script:rs.SessionStateProxy.SetVariable('PlayChoice', $playMode)
+    $script:rs.SessionStateProxy.SetVariable('JoinAddr', $joinAddr)
+    $script:rs.SessionStateProxy.SetVariable('JoinUser', $joinUser)
+    $script:rs.SessionStateProxy.SetVariable('JoinPass', $joinPass)
 
     $script:ps = [powershell]::Create()
     $script:ps.Runspace = $script:rs
@@ -325,6 +388,7 @@ function StartWorker($optT2A, $optRazor, $optMap, $installPath) {
             $InstallT2AMap = $OptT2A
             $InstallRazor  = $OptRazor
             $InstallMapEditor = $OptMap
+            Set-PlayMode -PlayMode $PlayChoice -Address $JoinAddr -LoginUser $JoinUser -LoginPass $JoinPass
 
             # Re-point the engine's console voice at the GUI log.
             function Banner($m) { $sync.Log.Enqueue("") ; $sync.Log.Enqueue("=== $m ===") }
@@ -332,12 +396,13 @@ function StartWorker($optT2A, $optRazor, $optMap, $installPath) {
             function Ok($m)     { $sync.Log.Enqueue("[ok] $m") }
             function Warn($m)   { $sync.Log.Enqueue("[!!] $m") }
 
-            $sync.StepNames = @($InstallSteps | ForEach-Object { $_.Name })
-            for ($i = 0; $i -lt $InstallSteps.Count; $i++) {
+            $steps = @(Get-InstallSteps)
+            $sync.StepNames = @($steps | ForEach-Object { $_.Name })
+            for ($i = 0; $i -lt $steps.Count; $i++) {
                 $sync.Step = $i
-                & $InstallSteps[$i].Run | Out-Null
+                & $steps[$i].Run | Out-Null
             }
-            $sync.Step = $InstallSteps.Count
+            $sync.Step = $steps.Count
         } catch {
             $sync.Error = $_.Exception.Message
             $sync.Log.Enqueue("")
@@ -386,23 +451,47 @@ $timer.Add_Tick({
             $btnPlay.Visible = $false
         } else {
             $lblDoneTitle.Text = "Install complete!"
-            $lblDoneBody.Text = "Everything is ready. A `"UO Offline`" shortcut is on your desktop.`r`n`r`nClicking it starts the server, then opens the game with Razor attached and logs you straight into the shard (account: admin / admin).`r`n`r`nFirst boot takes a minute while the world generates its bot population."
+            if ($script:ChosenMode -eq "join") {
+                $lblDoneBody.Text = "Everything is ready. A `"UO Offline`" shortcut is on your desktop.`r`n`r`nClicking it connects to your friend's game at $($script:ChosenAddr) as $($script:ChosenUser). Their game has to be running, and their PC set to host (friends.bat on their PC shows the address).`r`n`r`nTo change the address or your login later, run friends.bat in the install folder."
+            } elseif ($script:ChosenMode -eq "host") {
+                $lblDoneBody.Text = "Everything is ready. Two shortcuts are on your desktop: `"UO Offline`" plays, and `"UO Offline Friends`" shows the address to give friends.`r`n`r`nClicking Play starts the server, then opens the game with Razor attached and logs you in (account: admin / admin). Friends can connect while your game is running.`r`n`r`nFirst boot takes a minute while the world generates its bot population."
+            } else {
+                $lblDoneBody.Text = "Everything is ready. A `"UO Offline`" shortcut is on your desktop.`r`n`r`nClicking it starts the server, then opens the game with Razor attached and logs you straight into the shard (account: admin / admin).`r`n`r`nFirst boot takes a minute while the world generates its bot population. To play with friends later, run friends.bat in the install folder."
+            }
         }
         $panelDone.Visible = $true
     }
 })
 
 $btnInstall.Add_Click({
-    $panelWelcome.Visible = $false
-    $panelProgress.Visible = $true
     $chosenPath = $txtPath.Text.Trim()
     if (-not $chosenPath) {
         [System.Windows.Forms.MessageBox]::Show(
             "Please choose a folder to install into.", "UO Offline") | Out-Null
         return
     }
+    $panelWelcome.Visible = $false
+    $panelProgress.Visible = $true
     $script:InstallRootLabel = $chosenPath
-    StartWorker $chkT2A.Checked $chkRazor.Checked $chkMap.Checked $chosenPath
+    $script:ChosenMode = if ($radJoin.Checked) { "join" } elseif ($radHost.Checked) { "host" } else { "solo" }
+    $script:ChosenAddr = $txtJoinAddr.Text.Trim()
+    $script:ChosenUser = $txtJoinUser.Text.Trim()
+    $script:ChosenPass = $txtJoinPass.Text
+    if ($script:ChosenMode -eq "join") {
+        if (-not $script:ChosenAddr) {
+            $panelProgress.Visible = $false; $panelWelcome.Visible = $true
+            [System.Windows.Forms.MessageBox]::Show(
+                "Type your friend's address first. On their PC, friends.bat (or the UO Offline Friends shortcut) shows it.", "UO Offline") | Out-Null
+            return
+        }
+        if (-not $script:ChosenUser -or -not $script:ChosenPass) {
+            $panelProgress.Visible = $false; $panelWelcome.Visible = $true
+            [System.Windows.Forms.MessageBox]::Show(
+                "Pick a name and a password for your account on your friend's world. It is created the first time you log in.", "UO Offline") | Out-Null
+            return
+        }
+    }
+    StartWorker $chkT2A.Checked $chkRazor.Checked ($chkMap.Checked -and $script:ChosenMode -ne "join") $chosenPath $script:ChosenMode $script:ChosenAddr $script:ChosenUser $script:ChosenPass
     $timer.Start()
 })
 

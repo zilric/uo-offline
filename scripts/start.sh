@@ -60,7 +60,22 @@ say()  { printf '\033[0;36m--> %s\033[0m\n' "$*"; log_line "--> $*"; }
 warn() { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; log_line "[WARN] $*"; }
 die()  { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; log_line "[ERROR] $*"; gui_error "$*"; exit 1; }
 
-[[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built. Run install.sh first."
+# How this install plays: solo, host, or join. Written by install.sh and
+# changed by friends.sh. A join install has no server here at all.
+PLAY_MODE="solo"; PLAY_ADDRESS="127.0.0.1"; PLAY_PORT="${LISTEN_PORT}"
+if [[ -f "${INSTALL_ROOT}/play.json" ]]; then
+  _m="$(grep -oE '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' "${INSTALL_ROOT}/play.json" | sed -E 's/.*"([^"]*)"$/\1/' || true)"
+  _a="$(grep -oE '"address"[[:space:]]*:[[:space:]]*"[^"]*"' "${INSTALL_ROOT}/play.json" | sed -E 's/.*"([^"]*)"$/\1/' || true)"
+  _p="$(grep -oE '"port"[[:space:]]*:[[:space:]]*[0-9]+' "${INSTALL_ROOT}/play.json" | grep -oE '[0-9]+$' || true)"
+  [[ -n "${_m}" ]] && PLAY_MODE="${_m}"
+  [[ -n "${_a}" ]] && PLAY_ADDRESS="${_a}"
+  [[ -n "${_p}" ]] && PLAY_PORT="${_p}"
+  unset _m _a _p
+fi
+
+if [[ "${PLAY_MODE}" != "join" ]]; then
+  [[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built. Run install.sh first."
+fi
 
 # ---------------------------------------------------------------------------
 # Ask GitHub whether there is a newer UO Offline before starting anything.
@@ -87,7 +102,22 @@ fi
 # whole session.
 # ---------------------------------------------------------------------------
 SERVER_WAS_ALREADY_RUNNING=0
-if [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+if [[ "${PLAY_MODE}" == "join" ]]; then
+  # Joining a friend: nothing to start here. Check theirs is reachable,
+  # then it is client only from here on (and nothing to shut down after).
+  say "Joining a friend's game at ${PLAY_ADDRESS}:${PLAY_PORT}."
+  if ! timeout 5 bash -c "exec 3<>/dev/tcp/${PLAY_ADDRESS}/${PLAY_PORT}" 2>/dev/null; then
+    gui_error "Could not reach your friend's game at ${PLAY_ADDRESS}:${PLAY_PORT}.
+
+Check that their UO Offline is running and set to host (friends.sh on
+their PC shows the address), that the address is right, and that
+Tailscale is on if you use it.
+
+To change the address or your login: ./friends.sh join ADDRESS NAME PASSWORD"
+    die "Friend's game at ${PLAY_ADDRESS}:${PLAY_PORT} is not reachable."
+  fi
+  SERVER_WAS_ALREADY_RUNNING=1
+elif [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
   say "Server already running (pid $(cat "${PIDFILE}")). Launching client only."
   SERVER_WAS_ALREADY_RUNNING=1
 else
