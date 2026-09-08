@@ -289,6 +289,10 @@ namespace Server.CustomBots
             Class     = cls;
             SkillTier = tier;
 
+            // A thief joins the guild at creation. The engine refuses to
+            // steal from a player without the card.
+            JoinThievesGuildIfThief();
+
             // Crafter specialization — rolled for every bot but only used
             // when Class is Crafter. Cheap to always roll; keeps the field
             // valid regardless of class.
@@ -454,6 +458,26 @@ namespace Server.CustomBots
             ApplyClassSkills();
             ApplyClassStats();
             EquipmentTable.RollOutfit(this, Class, SkillTier);
+            JoinThievesGuildIfThief();
+        }
+
+        // Thieves carry the guild card, nobody else does. Stealing.cs only
+        // lets a guild member steal from another player, and a thief that
+        // is not in the guild would spend its life stealing from nobody.
+        private void JoinThievesGuildIfThief()
+        {
+            if (Class == BotClass.Thief)
+            {
+                if (NpcGuild != NpcGuild.ThievesGuild)
+                {
+                    NpcGuild = NpcGuild.ThievesGuild;
+                    NpcGuildJoinTime = Core.Now;
+                }
+            }
+            else if (NpcGuild == NpcGuild.ThievesGuild)
+            {
+                NpcGuild = NpcGuild.None;
+            }
         }
 
         // Zero every skill before a re-derive — without this, the old

@@ -468,9 +468,11 @@ namespace Server.CustomBots
 
         // Tradespeople don't draw. The gatherers do — the axe is a real
         // weapon and they already fight what finds them in the woods.
+        // Thieves sit it out too: no weapon skill, and a thief is the one
+        // wearing the flag more often than not.
         private static bool IsFightingClass(BotClass cls) =>
             !BotClassHelper.IsArtisan(cls) &&
-            cls is not BotClass.Crafter and not BotClass.Merchant;
+            cls is not BotClass.Crafter and not BotClass.Merchant and not BotClass.Thief;
 
         private static bool IsOwnSide(PlayerBot bot, Mobile gray)
         {

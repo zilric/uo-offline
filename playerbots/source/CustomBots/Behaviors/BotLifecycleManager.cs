@@ -230,6 +230,12 @@ namespace Server.CustomBots
             string current = bot.Behavior?.SerializableName ?? "Idle";
             string target  = PickNextBehavior(p, current);
 
+            // A thief sent to sit at a bank works it instead.
+            if (bot.Class == BotClass.Thief && target == "BankSitter")
+            {
+                target = "Thief";
+            }
+
             if (target == current)
             {
                 // Same behavior re-picked. Just refresh the phase clock; no

@@ -69,6 +69,7 @@ namespace Server.CustomBots
                                     // murders three to one even deduplicated,
                                     // so at 2.0 they were most of the talk
                 ["duel"]     = 2.0,
+                ["theft"]    = 2.0, // a pocket picked at the bank
                 ["kill"]     = 1.5,
                 ["party"]    = 1.5,
                 ["warband"]  = 1.2, // a patrol marched out

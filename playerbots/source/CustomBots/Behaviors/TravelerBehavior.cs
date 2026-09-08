@@ -2575,6 +2575,24 @@ private bool ZoneArrival(PlayerBot bot, int fallbackRange)
                 visitMinMinutes = 180;
                 visitMaxMinutes = 360;
             }
+            // A thief arriving anywhere people stand around with full packs
+            // goes to work. Banks, taverns and inns are the beats; a shop
+            // doorstep or the healer will do. Same arrival test as the bank
+            // sitter, so a thief that stopped down the street does not work
+            // the cobblestones.
+            else if (bot.Class == BotClass.Thief &&
+                     _destType is DestinationType.Bank or DestinationType.Tavern
+                               or DestinationType.Inn or DestinationType.Healer
+                               or DestinationType.Moongate
+                               or DestinationType.VendorMage or DestinationType.VendorProvisioner
+                               or DestinationType.VendorSmith or DestinationType.VendorTailor &&
+                     ZoneArrival(bot, 15))
+            {
+                targetBehavior  = "Thief";
+                chance          = 0.85;
+                visitMinMinutes = 8;
+                visitMaxMinutes = 20;
+            }
             else
             {
                 switch (_destType)

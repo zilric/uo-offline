@@ -1,6 +1,7 @@
 I hope you are all having fun! I am going to do more large updates rather than a lot of smaller ones, so expect updates every week or 2. As always, if you have bugs to report or even suggestions, message me on reddit or GitHub.
 
 Recent Updates
+-Thief bots actually steal now. They work banks and taverns, pick pockets (yours too), run and hide when caught, and get guard whacked if caught next to a banker.
 -Bots were using magic arrow and not kiting enough when attacking each other. They should back off and use stronger spells now.
 -Bots were getting ressed by nothing after standing around. They now seek out a wandering healer, go to an ankh, or get ressed by another friendly bot.
 -Random bots partying up wasn't happening often. Larger parties (3-5) will form up and help each other against reds and monsters, and res each other.

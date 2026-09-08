@@ -61,6 +61,10 @@ namespace Server.CustomBots
             Register("Tamer", () => new TamerBehavior());
             // Short themed stops at healers/inns/stables/shrines/taverns.
             Register("Visitor", () => new VisitorBehavior());
+            // A thief working the crowd where it stands. Loaded from a save
+            // it takes its current spot as the beat; a non-thief that got
+            // the name self-heals to Traveler on its first tick.
+            Register("Thief", () => new ThiefBehavior());
         }
 
         public static void Register(string name, Func<PlayerBotBehavior> factory)

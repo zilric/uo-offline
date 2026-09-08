@@ -92,6 +92,11 @@ namespace Server.CustomBots
         // gray out in the countryside and stands there to see who draws.
         private static readonly string GrayReq = Live("gray_request.txt");
         private static readonly string GrayAck = Live("gray_ack.json");
+        // thief_request.txt: "token [linger] [town]" — a fresh GM thief
+        // works a fat throwaway mark; town=1 stands them at a bank so the
+        // guards are part of the test.
+        private static readonly string ThiefReq = Live("thief_request.txt");
+        private static readonly string ThiefAck = Live("thief_ack.json");
         // bank_request.txt: "token" — does a bot saying "withdraw 5000" at a
         // bank actually move 5000 gold?
         private static readonly string BankReq = Live("bank_request.txt");
@@ -122,6 +127,7 @@ namespace Server.CustomBots
         private static long _lastPKFresh = -1;
         private static long _lastMurder = -1;
         private static long _lastGray = -1;
+        private static long _lastThief = -1;
         private static long _lastBank = -1;
         private static Timer _timer;
 
@@ -154,6 +160,7 @@ namespace Server.CustomBots
             _lastPKFresh = ReadToken(PKFreshReq) ?? 0;
             _lastMurder = ReadCountRequest(MurderReq, out _, out _) ?? 0;
             _lastGray = ReadLingerRequest(GrayReq, out _) ?? 0;
+            _lastThief = ReadThiefRequest(out _, out _) ?? 0;
             _lastBank = ReadLingerRequest(BankReq, out _) ?? 0;
             _timer = Timer.DelayCall(Interval, Interval, Poll);
         }
@@ -347,6 +354,13 @@ namespace Server.CustomBots
             {
                 _lastGray = grayTok.Value;
                 DoGrayTest(grayTok.Value, grayLinger);
+            }
+
+            var thiefTok = ReadThiefRequest(out var thiefLinger, out var thiefTown);
+            if (thiefTok != null && thiefTok.Value != _lastThief)
+            {
+                _lastThief = thiefTok.Value;
+                DoThiefTest(thiefTok.Value, thiefLinger, thiefTown);
             }
 
             var bankTok = ReadLingerRequest(BankReq, out var bankLinger);
@@ -848,6 +862,65 @@ namespace Server.CustomBots
             }
             WriteAck(GrayAck,
                 $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
+        }
+
+        // thief_request.txt: "token [linger] [town]" — does a thief bot
+        // really pick pockets, and what happens to it when it is caught?
+        private static void DoThiefTest(long token, int linger, bool town)
+        {
+            List<string> findings;
+            try
+            {
+                findings = BotThiefTest.Run(linger, town);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[EditorReload] thief test: {ex.Message}");
+                WriteAck(ThiefAck, $"{{\"token\":{token},\"error\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                return;
+            }
+            var items = new List<string>();
+            foreach (var f in findings)
+            {
+                items.Add("\"" + f.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"");
+            }
+            WriteAck(ThiefAck,
+                $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
+        }
+
+        // "token [linger] [town]" — seconds to run, then 1 to stand the rig
+        // at a bank instead of out in the countryside.
+        private static long? ReadThiefRequest(out int linger, out bool town)
+        {
+            linger = BotThiefTest.DefaultLinger;
+            town = false;
+            try
+            {
+                if (!File.Exists(ThiefReq))
+                {
+                    return null;
+                }
+                var parts = File.ReadAllText(ThiefReq).Split(
+                    new[] { ' ', '	' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1 || !long.TryParse(parts[0], out var t))
+                {
+                    return null;
+                }
+                if (parts.Length > 1 && int.TryParse(parts[1], out var n))
+                {
+                    linger = Math.Clamp(n, 0, 600);
+                }
+                if (parts.Length > 2 && int.TryParse(parts[2], out var flag))
+                {
+                    town = flag != 0;
+                }
+                return t;
+            }
+            catch
+            {
+                // file may be mid-write; retry next tick
+            }
+            return null;
         }
 
         // "token [linger]" — token plus an optional seconds argument.
