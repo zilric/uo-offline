@@ -154,6 +154,58 @@ namespace Server.CustomBots
         // via ApplyNameSuffix.
         public int BotGuildIndex = -1;
 
+        // ---- Real guild membership ----
+        //
+        // True once a real player has recruited this bot into a real
+        // guild (Server.Guilds.Guild). A bound bot is a permanent resident:
+        // the session manager never logs it out, the boot purge and the
+        // regenerations leave it alone, and its spawner forgets it so the
+        // slot refills with somebody new. It keeps living its life; it
+        // just never leaves. Saved with the bot (v7). Cleared again if the
+        // guild lets it go or disbands.
+        public bool GuildBound;
+
+        public bool IsPermanent => GuildBound && Guild is Server.Guilds.Guild;
+
+        public override void OnGuildChange(Server.Guilds.BaseGuild oldGuild)
+        {
+            base.OnGuildChange(oldGuild);
+
+            if (Guild is Server.Guilds.Guild g)
+            {
+                GuildBound = true;
+                DisplayGuildTitle = true;
+
+                // The real tag replaces the pretend one, or the name line
+                // would read "Name [TST] [UDL]".
+                BotGuildIndex = -1;
+
+                // Out of the spawner's books: the spawner refills the slot
+                // with a fresh bot and this one is its own person now.
+                if (Spawner != null)
+                {
+                    try { Spawner.Remove(this); } catch { }
+                    Spawner = null;
+                }
+
+                // A bank fixture that got recruited leaves its post.
+                if (LifecycleExempt)
+                {
+                    LifecycleExempt = false;
+                    BotSessionManager.FixedRoleCount--;
+                }
+
+                InvalidateProperties();
+                Console.WriteLine($"[guild] {Name} is now a member of [{g.Abbreviation}] {g.Name}");
+            }
+            else if (oldGuild != null && GuildBound)
+            {
+                GuildBound = false;
+                InvalidateProperties();
+                Console.WriteLine($"[guild] {Name} is out of {oldGuild.Name}, back to an ordinary life");
+            }
+        }
+
         // ---- Session state (BotSessionManager) ----
         //
         // When this bot's play session ends — it says goodbye and logs
@@ -289,14 +341,18 @@ namespace Server.CustomBots
             Class     = cls;
             SkillTier = tier;
 
+            // A thief joins the guild at creation. The engine refuses to
+            // steal from a player without the card.
+            JoinThievesGuildIfThief();
+
             // Crafter specialization — rolled for every bot but only used
             // when Class is Crafter. Cheap to always roll; keeps the field
             // valid regardless of class.
             CrafterSpec = CrafterTypeHelper.RollRandom();
 
             // Guild membership — ~40% of the population, weighted so big
-            // and small guilds emerge.
-            BotGuildIndex = BotGuilds.RollMembership();
+            // and small guilds emerge. Thieves mostly join their own.
+            BotGuildIndex = BotGuilds.RollMembership(Class);
 
             // Home city — where this bot "lives"; its destination rolls
             // favor home, so regulars emerge at every bank and forge.
@@ -454,6 +510,33 @@ namespace Server.CustomBots
             ApplyClassSkills();
             ApplyClassStats();
             EquipmentTable.RollOutfit(this, Class, SkillTier);
+            JoinThievesGuildIfThief();
+
+            // A bot re-derived into or out of the Thief class re-rolls its
+            // guild, so the thieves guild only ever holds thieves.
+            if (cls == BotClass.Thief || BotGuilds.Get(BotGuildIndex)?.ThievesOnly == true)
+            {
+                BotGuildIndex = BotGuilds.RollMembership(cls);
+            }
+        }
+
+        // Thieves carry the guild card, nobody else does. Stealing.cs only
+        // lets a guild member steal from another player, and a thief that
+        // is not in the guild would spend its life stealing from nobody.
+        private void JoinThievesGuildIfThief()
+        {
+            if (Class == BotClass.Thief)
+            {
+                if (NpcGuild != NpcGuild.ThievesGuild)
+                {
+                    NpcGuild = NpcGuild.ThievesGuild;
+                    NpcGuildJoinTime = Core.Now;
+                }
+            }
+            else if (NpcGuild == NpcGuild.ThievesGuild)
+            {
+                NpcGuild = NpcGuild.None;
+            }
         }
 
         // Zero every skill before a re-derive — without this, the old
@@ -973,7 +1056,7 @@ namespace Server.CustomBots
         {
             base.Serialize(writer);
 
-            writer.Write(6);                                       // version
+            writer.Write(7);                                       // version
             writer.Write(IsBot);
             writer.Write(_behavior?.SerializableName ?? "Idle");
             Personality.Write(writer);
@@ -982,6 +1065,7 @@ namespace Server.CustomBots
             writer.Write((byte)SkillTier);
             writer.Write((byte)CrafterSpec);                       // v5 layout (3 subtypes)
             writer.Write(BotGuildIndex);                           // v6
+            writer.Write(GuildBound);                              // v7
         }
 
         public override void Deserialize(IGenericReader reader)
@@ -1046,6 +1130,10 @@ namespace Server.CustomBots
                 // Pre-guild bots roll membership on load so an old save
                 // still produces a guilded population.
                 BotGuildIndex = BotGuilds.RollMembership();
+            }
+            if (version >= 7)
+            {
+                GuildBound = reader.ReadBool();
             }
 
             // Migrate legacy Crafter-class bots (saved before the split into

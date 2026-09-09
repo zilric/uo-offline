@@ -94,6 +94,10 @@ namespace Server.CustomBots
         // the trip; the four behind it went home.
         public int ReAims;
 
+        // A guild crew waits for guildmates who are recalling in before
+        // it marches. Mustering does nothing until this passes.
+        public DateTime HoldUntil;
+
         public void SetState(BotPartyState s)
         {
             State = s;
@@ -356,7 +360,10 @@ namespace Server.CustomBots
             {
                 if (m.Alive) standing++;
             }
-            if (leaderGone || standing == 0 ||
+            // A guild crew starts as the leader alone, with guildmates
+            // recalling in. It is not empty until its hold runs out.
+            bool holding = party.State == BotPartyState.Mustering && Core.Now < party.HoldUntil;
+            if (leaderGone || (standing == 0 && !holding) ||
                 Core.Now - party.FormedAt > maxLife)
             {
                 Disband(party, sayGoodbyes: !leaderGone);
@@ -398,6 +405,11 @@ namespace Server.CustomBots
         private static void TickMustering(BotParty party)
         {
             var leader = party.Leader;
+
+            if (Core.Now < party.HoldUntil)
+            {
+                return;
+            }
 
             bool allClose = true;
             foreach (var m in party.Members)
@@ -819,6 +831,71 @@ namespace Server.CustomBots
                 $"[party] {leader.Name} formed a party of {take + 1} " +
                 $"for {target.Dungeon} ({target.Name})");
             return party;
+        }
+
+        // -------------------------------------------------------------------
+        // Guild crews: a bot in a player's guild asked "anyone wanna group
+        // up" in guild chat. It leads; guildmates recall in and are added
+        // as they arrive (BotGuildChat drives that). The party holds its
+        // muster until the last one lands, then marches like any hunt.
+        // -------------------------------------------------------------------
+        public static bool CanLeadHunt(PlayerBot bot) =>
+            IsEligible(bot) && IsFighter(bot.Class) &&
+            bot.SkillTier >= BotSkillTier.Apprentice &&
+            PickDungeonFor(bot) != null;
+
+        public static BotParty FormGuildCrew(PlayerBot leader, TimeSpan hold)
+        {
+            if (!CanLeadHunt(leader))
+            {
+                return null;
+            }
+            var target = PickDungeonFor(leader);
+            if (target == null)
+            {
+                return null;
+            }
+
+            var party = new BotParty
+            {
+                Leader       = leader,
+                Target       = target,
+                EntranceTile = target.Location,
+                FormedAt     = Core.Now,
+                HoldUntil    = Core.Now + hold,
+            };
+            party.SetState(BotPartyState.Mustering);
+            _parties.Add(party);
+            Console.WriteLine(
+                $"[party] {leader.Name} is getting a guild crew together for " +
+                $"{target.Dungeon} ({target.Name})");
+            return party;
+        }
+
+        // A guildmate arrived. Only while the crew is still on the surface.
+        public static bool AddToCrew(BotParty party, PlayerBot member)
+        {
+            if (party == null || member == null || member.Deleted || !member.Alive ||
+                !_parties.Contains(party) || party.Members.Contains(member) ||
+                party.Leader == member || PartyOf(member) != null ||
+                party.State is BotPartyState.Entering or BotPartyState.Crawling)
+            {
+                return false;
+            }
+            party.Members.Add(member);
+            member.Behavior = new PartyMemberBehavior();
+            SayScene(member, "party_join", party);
+            Console.WriteLine($"[party] {member.Name} joined {party.Leader.Name}'s guild crew");
+            return true;
+        }
+
+        // The last guildmate is in (or nobody is coming): march now.
+        public static void ReleaseHold(BotParty party)
+        {
+            if (party != null && _parties.Contains(party))
+            {
+                party.HoldUntil = Core.Now;
+            }
         }
 
         // Nearest few dungeon entrances on the leader's landmass; random

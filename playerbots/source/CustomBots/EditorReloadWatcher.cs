@@ -92,6 +92,20 @@ namespace Server.CustomBots
         // gray out in the countryside and stands there to see who draws.
         private static readonly string GrayReq = Live("gray_request.txt");
         private static readonly string GrayAck = Live("gray_ack.json");
+        // thief_request.txt: "token [linger] [town]" — a fresh GM thief
+        // works a fat throwaway mark; town=1 stands them at a bank so the
+        // guards are part of the test.
+        private static readonly string ThiefReq = Live("thief_request.txt");
+        private static readonly string ThiefAck = Live("thief_ack.json");
+        // guild_request.txt: "token [linger]" — a throwaway REAL player
+        // founds a guild, recruits two bots, and calls for a group in
+        // guild chat.
+        private static readonly string GuildReq = Live("guild_request.txt");
+        private static readonly string GuildAck = Live("guild_ack.json");
+        // shutdown_request.txt: "token" — the launcher asks the server to
+        // save the world and stop, so it can be restarted with a different
+        // listener (solo <-> hosting for friends) without losing anything.
+        private static readonly string ShutdownReq = Live("shutdown_request.txt");
         // bank_request.txt: "token" — does a bot saying "withdraw 5000" at a
         // bank actually move 5000 gold?
         private static readonly string BankReq = Live("bank_request.txt");
@@ -122,6 +136,9 @@ namespace Server.CustomBots
         private static long _lastPKFresh = -1;
         private static long _lastMurder = -1;
         private static long _lastGray = -1;
+        private static long _lastThief = -1;
+        private static long _lastGuild = -1;
+        private static long _lastShutdown = -1;
         private static long _lastBank = -1;
         private static Timer _timer;
 
@@ -154,6 +171,9 @@ namespace Server.CustomBots
             _lastPKFresh = ReadToken(PKFreshReq) ?? 0;
             _lastMurder = ReadCountRequest(MurderReq, out _, out _) ?? 0;
             _lastGray = ReadLingerRequest(GrayReq, out _) ?? 0;
+            _lastThief = ReadThiefRequest(out _, out _) ?? 0;
+            _lastGuild = ReadCountRequest(GuildReq, out _, out _, 0) ?? 0;
+            _lastShutdown = ReadToken(ShutdownReq) ?? 0;
             _lastBank = ReadLingerRequest(BankReq, out _) ?? 0;
             _timer = Timer.DelayCall(Interval, Interval, Poll);
         }
@@ -349,6 +369,29 @@ namespace Server.CustomBots
                 DoGrayTest(grayTok.Value, grayLinger);
             }
 
+            var thiefTok = ReadThiefRequest(out var thiefLinger, out var thiefMode);
+            if (thiefTok != null && thiefTok.Value != _lastThief)
+            {
+                _lastThief = thiefTok.Value;
+                DoThiefTest(thiefTok.Value, thiefLinger, thiefMode);
+            }
+
+            var guildTok = ReadCountRequest(GuildReq, out var guildKeep, out var guildLinger, 0);
+            if (guildTok != null && guildTok.Value != _lastGuild)
+            {
+                _lastGuild = guildTok.Value;
+                DoGuildTest(guildTok.Value, guildLinger, guildKeep != 0);
+            }
+
+            var downTok = ReadToken(ShutdownReq);
+            if (downTok != null && downTok.Value != _lastShutdown)
+            {
+                _lastShutdown = downTok.Value;
+                Console.WriteLine("[EditorReload] shutdown requested by the launcher — saving the world and stopping");
+                try { World.Save(); } catch (Exception ex) { Console.WriteLine($"[EditorReload] save before shutdown failed: {ex.Message}"); }
+                Core.Kill();
+            }
+
             var bankTok = ReadLingerRequest(BankReq, out var bankLinger);
             if (bankTok != null && bankTok.Value != _lastBank)
             {
@@ -366,7 +409,7 @@ namespace Server.CustomBots
             var bots = new List<PlayerBot>();
             foreach (var m in World.Mobiles.Values)
             {
-                if (m is PlayerBot b && !b.Deleted && b.Behavior is PKBehavior)
+                if (m is PlayerBot b && !b.Deleted && !b.IsPermanent && b.Behavior is PKBehavior)
                 {
                     bots.Add(b);
                 }
@@ -850,6 +893,89 @@ namespace Server.CustomBots
                 $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
         }
 
+        // guild_request.txt: "token [linger]" — do recruited bots join a
+        // real guild, and does the guild-chat call bring them?
+        private static void DoGuildTest(long token, int linger, bool keep)
+        {
+            List<string> findings;
+            try
+            {
+                findings = BotGuildTest.Run(linger, keep);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[EditorReload] guild test: {ex.Message}");
+                WriteAck(GuildAck, $"{{\"token\":{token},\"error\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                return;
+            }
+            var items = new List<string>();
+            foreach (var f in findings)
+            {
+                items.Add("\"" + f.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"");
+            }
+            WriteAck(GuildAck,
+                $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
+        }
+
+        // thief_request.txt: "token [linger] [mode]" — does a thief bot
+        // really pick pockets, and what happens to it when it is caught?
+        private static void DoThiefTest(long token, int linger, int mode)
+        {
+            List<string> findings;
+            try
+            {
+                findings = BotThiefTest.Run(linger, mode);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[EditorReload] thief test: {ex.Message}");
+                WriteAck(ThiefAck, $"{{\"token\":{token},\"error\":\"{ex.Message.Replace("\"", "'")}\"}}");
+                return;
+            }
+            var items = new List<string>();
+            foreach (var f in findings)
+            {
+                items.Add("\"" + f.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"");
+            }
+            WriteAck(ThiefAck,
+                $"{{\"token\":{token},\"findings\":[{string.Join(",", items)}]}}");
+        }
+
+        // "token [linger] [mode]" — seconds to run, then 0 countryside,
+        // 1 a bank, 2 a dungeon floor.
+        private static long? ReadThiefRequest(out int linger, out int mode)
+        {
+            linger = BotThiefTest.DefaultLinger;
+            mode = 0;
+            try
+            {
+                if (!File.Exists(ThiefReq))
+                {
+                    return null;
+                }
+                var parts = File.ReadAllText(ThiefReq).Split(
+                    new[] { ' ', '	' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 1 || !long.TryParse(parts[0], out var t))
+                {
+                    return null;
+                }
+                if (parts.Length > 1 && int.TryParse(parts[1], out var n))
+                {
+                    linger = Math.Clamp(n, 0, 600);
+                }
+                if (parts.Length > 2 && int.TryParse(parts[2], out var flag))
+                {
+                    mode = Math.Clamp(flag, 0, 2);
+                }
+                return t;
+            }
+            catch
+            {
+                // file may be mid-write; retry next tick
+            }
+            return null;
+        }
+
         // "token [linger]" — token plus an optional seconds argument.
         // death_request.txt "token pk": hand a red a victim. Picks a PK out
         // in the field (never one standing under guards) and drops an
@@ -965,9 +1091,10 @@ namespace Server.CustomBots
         }
 
         // "token [n] [linger]" — token plus two optional integer arguments.
-        private static long? ReadCountRequest(string path, out int count, out int linger)
+        private static long? ReadCountRequest(string path, out int count, out int linger,
+            int defaultCount = 6)
         {
-            count = 6;
+            count = defaultCount;
             linger = BotMurderTest.DefaultLinger;
             try
             {
@@ -983,7 +1110,7 @@ namespace Server.CustomBots
                 }
                 if (parts.Length > 1 && int.TryParse(parts[1], out var n))
                 {
-                    count = Math.Clamp(n, 1, 20);
+                    count = Math.Clamp(n, defaultCount == 0 ? 0 : 1, 20);
                 }
                 if (parts.Length > 2 && int.TryParse(parts[2], out var l))
                 {

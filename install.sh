@@ -861,8 +861,7 @@ write_modernuo_config() {
     "accountHandler.maxAccountsPerIP": "10",
     "autosave.enabled": "true",
     "autosave.saveDelay": "00:05:00",
-    "serverList.address": "127.0.0.1",
-    "serverList.autoDetect": "false",
+    "serverListing.autoDetect": "false",
     "serverListing.name": "${RESOLVED_SHARD_NAME}",
     "serverListing.serverName": "${RESOLVED_SHARD_NAME}",
     "accountHandler.enableAutoAccountCreation": "True",
@@ -1035,6 +1034,28 @@ install_runtime_scripts() {
   cp "${src_dir}/start.sh"              "${INSTALL_ROOT}/start.sh"
   cp "${src_dir}/stop.sh"               "${INSTALL_ROOT}/stop.sh"
   cp "${src_dir}/reset-first-launch.sh" "${INSTALL_ROOT}/reset-first-launch.sh"
+  if [[ -f "${src_dir}/friends.sh" ]]; then
+    cp "${src_dir}/friends.sh" "${INSTALL_ROOT}/friends.sh"
+    chmod +x "${INSTALL_ROOT}/friends.sh"
+    ok "Installed friends.sh"
+  fi
+
+  # play.json - the launcher's memory: last choice, whether to keep asking,
+  # the friend's address, and the owner login it restores for solo/host.
+  if [[ ! -f "${INSTALL_ROOT}/play.json" ]]; then
+    cat > "${INSTALL_ROOT}/play.json" <<EOF
+{
+  "mode": "solo",
+  "remember": false,
+  "address": "",
+  "user": "",
+  "port": 2593,
+  "owner_user": "${OWNER_USER}",
+  "owner_pass": "${OWNER_PASS}"
+}
+EOF
+    ok "Wrote play.json"
+  fi
 
   # The launcher's update checker is optional - an install without it just
   # never offers updates, which is the quiet way to fail.

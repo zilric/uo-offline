@@ -237,6 +237,41 @@ namespace Server.CustomBots
         // so the mode can't be inferred from _fleeFrom being set.
         private bool     _fleeing;
 
+        // FIGHTING RETREAT. Set by StartFlee after looking the pack over:
+        // true when nothing in it is beyond the bot on its own, so the
+        // right play is to run until they string out and then turn on the
+        // one in front. False means a true flee: something in there would
+        // beat the bot one on one, and the place is remembered so the bot
+        // does not walk back into it (see _avoidCenter).
+        private bool     _fightingRetreat;
+        private bool     _pickingOff;      // stopped running, on the straggler
+        private Mobile   _pickOffFoe;
+        private int      _pickOffTurns;    // turns taken without a kill
+        private DateTime _pickOffSince = DateTime.MinValue;
+
+        // Where the last pack the bot could not handle was standing, and
+        // for how long fresh fights near it are declined. Without this a
+        // bot that got clear turned straight round, took the first monster
+        // that had followed it, was outnumbered again in a second, and ran
+        // back to the waypoint it had just left. Back and forth for
+        // minutes, never a kill on either side.
+        private Point3D  _avoidCenter;
+        private DateTime _avoidUntil = DateTime.MinValue;
+
+        // HUNTED. A flee that ends "clear" at fourteen tiles is no use
+        // against something that follows: a lich walked one mage between
+        // the same two waypoints seven times in a row, ten tiles apart,
+        // each flee starting at a few hit points less than the last. The
+        // second flee from the same thing inside a minute means it is not
+        // giving up, so the bot stops treating fourteen tiles as safe and
+        // runs until it really is out of reach, and stays away longer.
+        private string   _lastFleeName;
+        private DateTime _lastFleeAt = DateTime.MinValue;
+        private DateTime _fleeStreakStart = DateTime.MinValue;
+        private int      _fleeStreak;
+        private bool     _hunted;
+        private bool     _withdrawFlee;   // nobody attacking, the room was just too much
+
         // UNREACHABLE-FOE detection. A bot can lock onto a monster it can SEE
         // but cannot physically reach — the classic case is a large rat (or
         // other critter) inside a sealed building: visible through a wall/
@@ -466,6 +501,14 @@ namespace Server.CustomBots
             _rangedFoe = null;
             _fleeFrom = null;
             _fleeing = false;
+            _fightingRetreat = false;
+            _pickingOff = false;
+            _pickOffFoe = null;
+            _pickOffTurns = 0;
+            _avoidUntil = DateTime.MinValue;
+            _fleeStreak = 0;
+            _hunted = false;
+            _lastFleeName = null;
             _progressFoe = null;
             _pullUntil = DateTime.MinValue;
             _nextWithdrawAt = DateTime.MinValue;
@@ -531,6 +574,16 @@ namespace Server.CustomBots
                     {
                         TryEventLine(bot, 0.35, "combat_victory");
 
+                        // One down. The fighting retreat is working; the
+                        // turn count starts over for the next one.
+                        if (_pickingOff && foe == _pickOffFoe)
+                        {
+                            Console.WriteLine(
+                                $"[Bot {bot.Name}] picked off '{foe.Name}' " +
+                                $"(hp {bot.Hits}/{bot.HitsMax})");
+                            _pickOffTurns = 0;
+                        }
+
                         // Notable kills go in the shard's event journal so
                         // bank gossip can retell them. Trash mobs (rats,
                         // birds) don't make the news, and bot-vs-bot kills
@@ -550,6 +603,8 @@ namespace Server.CustomBots
                     _rangedFoe = null;
                     _progressFoe = null;
                     _packAttackers = 0;
+                    _pickingOff = false;
+                    _pickOffFoe = null;
                     ClearCast();
                     StopStepTimer();
 
@@ -609,7 +664,7 @@ namespace Server.CustomBots
             // business starting anything. If the thing is already on it,
             // keep running; if it isn't, decline the fight and fall
             // through to the rest branch to bandage up first.
-            if (target != null && TooHurtToStart(bot))
+            if (target != null && TooHurtToStart(bot, Math.Max(1, _targetKnot.Count)))
             {
                 var scene = NearThreat(bot);
                 if (scene.Attackers > 0 || TileDist(bot, target.Location) <= 3)
@@ -710,6 +765,7 @@ namespace Server.CustomBots
                         $"weighing {room.Weight} vs budget {RoomBudget(bot)}, " +
                         $"nearest {room.NearestDist}");
                 }
+                OnWithdrew(bot, room.Center);
                 StartFlee(bot, null);
                 return;
             }
@@ -912,6 +968,13 @@ namespace Server.CustomBots
         // Called when the current patrol goal is reached. Return true to
         // claim the arrival (the base will NOT pick a new goal this pass).
         protected virtual bool OnPatrolGoalReached(PlayerBot bot) => false;
+
+        // The bot just backed out of a room it could not stand in. Nothing
+        // was chasing it, so nothing stops its own patrol walking it
+        // straight back in thirty seconds later: one crawler withdrew from
+        // the same eight ghouls four times in two minutes. A subclass whose
+        // patrol has a notion of "this room" drops it here.
+        protected virtual void OnWithdrew(PlayerBot bot, Point3D room) { }
 
         // When false, the bot stops STARTING fights: FindNearbyEnemy only
         // returns foes already attacking it or a friend. A DungeonCrawler
@@ -1966,6 +2029,19 @@ namespace Server.CustomBots
         {
             overwhelming = false;
 
+            // A murderer or a gray with a blade in one of us outranks every
+            // monster in the room. This scan is monsters only below, and
+            // BotGrayWatch's sweep is the only thing that ever handed a bot
+            // a person, so a red could open up on a crawler mid-fight and
+            // the crawler would finish the skeleton first, or never look
+            // up at all.
+            var person = FindPersonAttacking(bot, out overwhelming);
+            if (person != null)
+            {
+                _targetKnot = default;
+                return person;
+            }
+
             Mobile best = null;
             int bestScore = int.MinValue;
             bool bestOverwhelming = false;
@@ -1999,6 +2075,17 @@ namespace Server.CustomBots
                 // Beyond the bot's own sight a monster only registers when
                 // it's in a fight with the bot or a friendly bot.
                 if (dist > SightRange && !attackingMe && !attackingFriend)
+                {
+                    continue;
+                }
+
+                // The bot just ran from a pack standing here that it could
+                // not have taken apart. Starting a fresh fight next to it
+                // is how the run-flee-run loop began. A friend already in
+                // there still gets the assist.
+                if (!attackingMe && !attackingFriend &&
+                    Core.Now < _avoidUntil &&
+                    TileDist(bc.Location, _avoidCenter) <= PackRadius + 4)
                 {
                     continue;
                 }
@@ -2101,6 +2188,52 @@ namespace Server.CustomBots
             return best;
         }
 
+        // A player-shaped attacker who is fair game: a murderer, or anybody
+        // who flagged gray by starting on us or a friend. Nearest first.
+        // Only ones already IN the fight: choosing to start on a red who is
+        // minding his own business is BotGrayWatch's call, with its
+        // willingness roll and its cap on how many pile on.
+        private Mobile FindPersonAttacking(PlayerBot bot, out bool overwhelming)
+        {
+            overwhelming = false;
+            Mobile best = null;
+            int bestDist = int.MaxValue;
+
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, AssistRange))
+            {
+                if (m == bot || !m.Player || m.Deleted || !m.Alive) continue;
+                if (m.Combatant is not Mobile victim) continue;
+
+                bool onMe     = victim == bot;
+                bool onFriend = !onMe && (victim is PlayerBot || IsPartyFriend(bot, victim));
+                if (!onMe && !onFriend) continue;
+
+                // Not a crime to hit back at a red or a gray. Anybody else
+                // hitting us is a duel, a faction fight, or a guild war,
+                // and those have their own systems.
+                if (!BotGrayWatch.FairGame(m)) continue;
+                if (!bot.CanSee(m)) continue;
+
+                int dist = TileDist(bot, m.Location);
+                if (!onMe && dist > SightRange) continue;
+
+                // Ours first, then the closest.
+                int rank = (onMe ? 0 : 100) + dist;
+                if (rank < bestDist)
+                {
+                    bestDist = rank;
+                    best = m;
+                }
+            }
+
+            if (best != null)
+            {
+                int dare = EffectiveDare(bot, best);
+                overwhelming = best.HitsMax > dare * 3 / 2;
+            }
+            return best;
+        }
+
         // The knot of monsters standing with the foe FindNearbyEnemy last
         // picked. The engage branch reads it to decide whether the fight
         // needs pulling first.
@@ -2171,12 +2304,26 @@ namespace Server.CustomBots
         // already attacking it skips the threat gate entirely. It did that
         // until it died, resurrected, and did it again. Every monster
         // death in the soak was this loop, not a bot misjudging a fight.
-        private bool TooHurtToStart(PlayerBot bot)
+        // `foes` is how many will be swinging once the fight starts. The
+        // line a bot RUNS at rises with every attacker past the first (see
+        // CheckRetreat), and this used to test the bare line, so a bot at
+        // 48 of 82 was fit to start on a pair of skeletons and was back
+        // over the two-attacker line and running the moment it did. Six
+        // times in a row, never a swing that mattered. Fit to start means
+        // fit to start THAT fight, with some room to fight it.
+        private bool TooHurtToStart(PlayerBot bot, int foes = 1)
         {
             if (bot.HitsMax <= 0) return false;
             double fitAt = (DefenderMode
                 ? DefenderRetreatHpFraction
                 : RetreatHpFraction) / _nerve;
+            int extra = foes - 1;
+            if (extra > 0)
+            {
+                fitAt = Math.Min(0.95, fitAt + 0.10 * Math.Min(4, extra));
+            }
+            // Starting exactly on the line means running at the first hit.
+            fitAt = Math.Min(0.95, fitAt + 0.08);
             return bot.Hits < bot.HitsMax * fitAt;
         }
 
@@ -2191,7 +2338,7 @@ namespace Server.CustomBots
         // base ceiling, raised 60% for every friendly bot already fighting
         // the foe (bravery in numbers — crowds swarm what no one bot would
         // touch alone).
-        private static int EffectiveDare(PlayerBot bot, BaseCreature foe)
+        private static int EffectiveDare(PlayerBot bot, Mobile foe)
         {
             int rank = BotSkillTierHelper.Rank(bot.SkillTier);
             if (rank < 0)
@@ -2235,6 +2382,8 @@ namespace Server.CustomBots
             public int     Count;        // hostile monsters seen
             public int     Weight;       // summed HitsMax - the pack's heft
             public int     Attackers;    // how many are actually on the bot
+            public int     CloseAttackers; // of those, the ones in swing range
+            public int     CloseWeight;    // and what those close ones weigh
             public int     NearestDist;  // tiles to the closest one
             public Point3D Center;       // where the mass of them sits
             public bool    Any => Count > 0;
@@ -2264,10 +2413,25 @@ namespace Server.CustomBots
 
                 p.Count++;
                 p.Weight += bc.HitsMax;
-                if (bc.Combatant == bot) p.Attackers++;
 
                 int d = TileDist(bot, bc.Location);
                 if (d < p.NearestDist) p.NearestDist = d;
+
+                // "On me" is anything that has picked the bot as its
+                // target, out to the edge of sight. "Close" is the part of
+                // that which can actually reach the bot this second. A
+                // fighting retreat needs the second number: a pack that is
+                // chasing counts entirely as attackers while it is still
+                // eight tiles back.
+                if (bc.Combatant == bot)
+                {
+                    p.Attackers++;
+                    if (d <= 2)
+                    {
+                        p.CloseAttackers++;
+                        p.CloseWeight += bc.HitsMax;
+                    }
+                }
 
                 sx += bc.X;
                 sy += bc.Y;
@@ -2460,6 +2624,185 @@ namespace Server.CustomBots
         }
 
         // -------------------------------------------------------------------
+        // FIGHTING RETREAT
+        //
+        // What a player does with a pack on their heels is not "run until
+        // clear, walk back, get chased again". They run until the pack
+        // strings out, since monsters do not all move at one speed and do
+        // not all give chase for the same distance, then turn on whichever
+        // one is out in front, kill it, and run again if the rest arrive.
+        // The pack gets smaller every pass.
+        //
+        // Whether that is on the table is decided ONCE, when the flee
+        // starts: is there anything in this pack the bot could not beat by
+        // itself? If there is, turning round just means dying to that one
+        // with company, so the bot runs for real and remembers the spot.
+        // If there is not, every flee tick looks for the moment the one in
+        // front is alone.
+        // -------------------------------------------------------------------
+
+        // Turns without a kill before the bot admits the pack is not going
+        // to string out, and the window over which they are counted.
+        private const int PickOffMaxTurns = 4;
+        private static readonly TimeSpan PickOffWindow = TimeSpan.FromSeconds(90);
+
+        // How far ahead of the second monster the first must be. A melee
+        // bot has to finish, or at least badly hurt, the leader before the
+        // next one is in reach; a caster needs a cast's worth of room, and
+        // a chaser a few tiles back covers that in one.
+        private const int PickOffGapMelee  = 4;
+        private const int PickOffGapRanged = 4;
+
+        // How long fresh fights are declined around a pack the bot ran from.
+        private static readonly TimeSpan AvoidWindow = TimeSpan.FromSeconds(45);
+
+        // Two flees from the same thing inside this window is being hunted;
+        // a hunted bot stays away from the spot for the longer window.
+        private static readonly TimeSpan HuntedWindow      = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan HuntedAvoidWindow = TimeSpan.FromSeconds(120);
+
+        // Could this bot take the pack apart one at a time? True when the
+        // pack is nothing but monsters it would fight alone, and not so
+        // many of them that the plan is silly. Judged against the bot's
+        // OWN dare: a friend in the room may not still be there on the
+        // next turn.
+        private bool AssessPickOff(PlayerBot bot, in ThreatPicture near, Mobile threat)
+        {
+            // Something that is not a monster started this: a red, a
+            // faction enemy. Turning on a straggling skeleton with a player
+            // on your heels is how you die to the player.
+            if (threat != null && !IsHostileMonster(threat) && threat.Alive &&
+                threat.Map == bot.Map)
+            {
+                if (CombatDebug)
+                {
+                    Console.WriteLine(
+                        $"[Bot {bot.Name}] true flee — '{threat.Name}' is not a monster");
+                }
+                return false;
+            }
+
+            if (!near.Any)
+            {
+                return threat == null || threat.HitsMax <= BaseDare(bot) * _nerve;
+            }
+
+            int    dare    = (int)(BaseDare(bot) * _nerve);
+            int    biggest = 0;
+            string worst   = null;
+
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, SightRange))
+            {
+                if (m == bot || !IsHostileMonster(m)) continue;
+                if (m.HitsMax > biggest)
+                {
+                    biggest = m.HitsMax;
+                    worst   = m.Name;
+                }
+            }
+
+            // No cap worth the name on how many: a dozen rats picked off
+            // one at a time is exactly the plan. Just not a whole spawn.
+            bool can = biggest <= dare && near.Count <= 12;
+
+            if (CombatDebug)
+            {
+                Console.WriteLine(can
+                    ? $"[Bot {bot.Name}] fighting retreat — {near.Count} of them, " +
+                      $"biggest '{worst}' {biggest} vs dare {dare}"
+                    : $"[Bot {bot.Name}] true flee — " +
+                      (biggest > dare
+                          ? $"'{worst}' {biggest} is beyond dare {dare}"
+                          : $"{near.Count} of them is too many"));
+            }
+            return can;
+        }
+
+        // Looks for the moment to turn: the nearest monster is inside
+        // reach, the next one is well behind it, the bot is fit to fight
+        // and the leader is something it would fight alone. Takes the turn
+        // when it finds one and returns true; the fast loop then runs the
+        // fight through its normal chase or ranged branch, and CheckRetreat
+        // sends the bot back to running if the rest catch up.
+        private bool TryTurnOnStraggler(PlayerBot bot, Mobile chaser)
+        {
+            if (!_fightingRetreat || _pickingOff) return false;
+            if (_pickOffTurns >= PickOffMaxTurns) return false;
+            if (TooHurtToStart(bot, 2)) return false;
+            if (bot.Map == null) return false;
+
+            // A non-monster chaser (a red) still close means no turning.
+            if (chaser != null && !IsHostileMonster(chaser) && chaser.Alive &&
+                chaser.Map == bot.Map &&
+                TileDist(bot, chaser.Location) <= SightRange + 4)
+            {
+                return false;
+            }
+
+            Mobile lead = null;
+            int d1 = int.MaxValue, d2 = int.MaxValue;
+            foreach (var m in bot.Map.GetMobilesInRange(bot.Location, SightRange + 4))
+            {
+                if (m == bot || !IsHostileMonster(m)) continue;
+                if (bot.IsUnreachable((BaseCreature)m)) continue;
+
+                int d = TileDist(bot, m.Location);
+                if (d < d1)
+                {
+                    d2   = d1;
+                    d1   = d;
+                    lead = m;
+                }
+                else if (d < d2)
+                {
+                    d2 = d;
+                }
+            }
+            if (lead == null) return false;
+
+            int gap = d2 == int.MaxValue ? 99 : d2 - d1;
+
+            bool isolated;
+            if (RangedCombat)
+            {
+                isolated = d1 >= 3 && d1 <= StandoffMax + 2 &&
+                           gap >= PickOffGapRanged && HasLOS(bot, lead);
+            }
+            else
+            {
+                isolated = d1 <= 5 && gap >= PickOffGapMelee && HasLOS(bot, lead);
+            }
+            if (!isolated) return false;
+
+            // Alone it has to be something the bot would take on. Its own
+            // dare here, no crowd bonus: the crowd is what it is running
+            // from.
+            if (lead.HitsMax > BaseDare(bot) * _nerve) return false;
+
+            if (_pickOffTurns == 0)
+            {
+                _pickOffSince = Core.Now;
+            }
+            _pickOffTurns++;
+
+            Console.WriteLine(
+                $"[Bot {bot.Name}] turns on '{lead.Name}' — {d1} tiles off, " +
+                $"next one {(d2 == int.MaxValue ? "nowhere" : d2 + " tiles")} " +
+                $"(hp {bot.Hits}/{bot.HitsMax}, turn {_pickOffTurns}/{PickOffMaxTurns})");
+
+            _fleeing    = false;
+            _fleeFrom   = null;
+            ClearEscapeRoute();
+            _pickingOff = true;
+            _pickOffFoe = lead;
+            _gambling   = false;
+
+            bot.Combatant = lead;
+            ChaseFoe(bot, lead);
+            return true;
+        }
+
+        // -------------------------------------------------------------------
         // ReconsiderTarget — mid-fight target switching.
         //
         // Without this, a bot locked onto foe A ignores foe B chewing on it
@@ -2482,23 +2825,44 @@ namespace Server.CustomBots
             bool currentAttackingMe = current.Combatant == bot;
             int currentDist = TileDist(bot, current.Location);
 
+            // A person is a person: a red, or a gray this bot drew on. The
+            // rule below used to hand that fight to the first rat that bit
+            // the bot, since a red circling at range is "not attacking me"
+            // and the rat is. Nobody who drew on a murderer turned round
+            // for a rat.
+            bool currentIsPerson = current.Player;
+
             Mobile better = null;
             int betterDist = int.MaxValue;
 
             foreach (var m in bot.Map.GetMobilesInRange(bot.Location, SightRange))
             {
                 if (m == bot || m == current || m.Deleted || !m.Alive) continue;
-                if (m is not BaseCreature bc) continue;
-                if (bc.Combatant != bot) continue;   // only live attackers matter
-                if (bot.IsUnreachable(bc)) continue;
+                if (m.Combatant != bot) continue;   // only live attackers matter
 
-                int dist = TileDist(bot, bc.Location);
+                bool worthIt;
+                int dist = TileDist(bot, m.Location);
 
-                bool worthIt = (!currentAttackingMe && dist <= currentDist) ||
-                               dist + 3 <= currentDist;
+                if (m is BaseCreature bc)
+                {
+                    if (currentIsPerson) continue;
+                    if (bot.IsUnreachable(bc)) continue;
+                    worthIt = (!currentAttackingMe && dist <= currentDist) ||
+                              dist + 3 <= currentDist;
+                }
+                else if (m.Player && BotGrayWatch.FairGame(m) && bot.CanSee(m))
+                {
+                    // A murderer opening up on us while we fight a monster:
+                    // the monster can wait. Between two people, the closer.
+                    worthIt = !currentIsPerson || dist + 3 <= currentDist;
+                }
+                else
+                {
+                    continue;
+                }
                 if (worthIt && dist < betterDist)
                 {
-                    better = bc;
+                    better = m;
                     betterDist = dist;
                 }
             }
@@ -2585,11 +2949,26 @@ namespace Server.CustomBots
                     ? int.MaxValue
                     : TileDist(bot, _fleeFrom.Location);
 
-                bool monstersClear = !near.Any || near.NearestDist >= SightRange + 4;
-                bool chaserClear   = fromGone || fromDist >= SightRange + 4;
+                // Hunted means fourteen tiles is not clear, twenty-four is.
+                int clearAt = SightRange + 4 + (_hunted ? 10 : 0);
+                bool monstersClear = !near.Any || near.NearestDist >= clearAt;
+                bool chaserClear   = fromGone || fromDist >= clearAt;
 
                 if (monstersClear && chaserClear || Core.Now >= _fleeUntil)
                 {
+                    // A pack the bot could not have handled one at a time
+                    // stays off limits for a while. Where it was is the
+                    // best guess of where it still is.
+                    // A withdrawal is its own reason: nothing was chasing,
+                    // the room was too much, and the room is still there.
+                    if (!_fightingRetreat || _withdrawFlee || _hunted ||
+                        _pickOffTurns >= PickOffMaxTurns)
+                    {
+                        _avoidCenter = near.Any ? near.Center
+                                     : !fromGone ? _fleeFrom.Location
+                                     : bot.Location;
+                        _avoidUntil  = Core.Now + (_hunted ? HuntedAvoidWindow : AvoidWindow);
+                    }
                     _fleeing  = false;
                     _fleeFrom = null;
                     ClearEscapeRoute();
@@ -2627,6 +3006,13 @@ namespace Server.CustomBots
                 // ended that way. Standing still is the engine's doing; the
                 // route is still good, so keep it and wait to be free.
                 if (bot.Spell != null || bot.Paralyzed)
+                {
+                    return;
+                }
+
+                // THE TURN. Running has strung the pack out and the one in
+                // front is alone: stop and take it.
+                if (TryTurnOnStraggler(bot, fromGone ? null : _fleeFrom))
                 {
                     return;
                 }
@@ -3168,6 +3554,49 @@ namespace Server.CustomBots
             // trigger the retreat. Running from a single monster inside a
             // pack is how a bot ends up sprinting through the rest of it.
             var near = NearThreat(bot);
+
+            // A fresh flee, as opposed to the rest of the pack catching up
+            // mid pick-off, starts the turn count over. The count is what
+            // stops a bot that keeps turning and never finishing anything.
+            if (!_pickingOff &&
+                Core.Now - _pickOffSince > PickOffWindow)
+            {
+                _pickOffTurns = 0;
+            }
+            _pickingOff = false;
+            _pickOffFoe = null;
+            _fightingRetreat = AssessPickOff(bot, near, threat);
+
+            // Same thing again, soon after? Count it.
+            string fleeName = threat?.Name ?? "the area";
+            if (fleeName == _lastFleeName && Core.Now - _lastFleeAt < HuntedWindow)
+            {
+                _fleeStreak++;
+            }
+            else
+            {
+                _fleeStreak = 1;
+                _fleeStreakStart = Core.Now;
+            }
+            _lastFleeName = fleeName;
+            _lastFleeAt   = Core.Now;
+            _withdrawFlee = threat == null;
+
+            // Hunted is the same thing chasing the bot off again and again.
+            // A pack the bot COULD take apart still counts if it never
+            // strings out: a lich and two knights that keep station on a
+            // mage walked her between the same two waypoints eight times
+            // while every flee was judged a fighting retreat. The one thing
+            // that clears it is the plan working, a turn taken since the
+            // streak began.
+            bool turning = _pickOffTurns > 0 && _pickOffSince >= _fleeStreakStart;
+            _hunted = _fleeStreak >= 2 && !turning;
+            if (_hunted && CombatDebug)
+            {
+                Console.WriteLine(
+                    $"[Bot {bot.Name}] HUNTED by '{fleeName}' — flee {_fleeStreak} in a row, " +
+                    $"running further");
+            }
             Point3D away = near.Any ? near.Center
                          : threat != null ? threat.Location
                          : bot.Location;
@@ -3186,7 +3615,7 @@ namespace Server.CustomBots
             // enough to finish. Blind sprinting keeps the old short window
             // — with nowhere to aim, more time just means more shuffling.
             _fleeUntil = Core.Now +
-                TimeSpan.FromSeconds(_escapeFollower != null ? 20.0 : 8.0);
+                TimeSpan.FromSeconds(_escapeFollower != null ? (_hunted ? 40.0 : 20.0) : 8.0);
 
             EnsureStepTimer(bot, running: true);
         }
@@ -3210,7 +3639,29 @@ namespace Server.CustomBots
             // than they can answer leaves at FULL health; they don't stand
             // there to see how it goes. Two or more already swinging and a
             // room weighing twice what this bot can handle is that moment.
-            if (near.Attackers >= 2 && near.Weight > RoomBudget(bot) * 2 * _nerve)
+            if (_pickingOff)
+            {
+                // Mid pick-off the whole pack is "on me" by definition; it
+                // is chasing. What matters is who has actually arrived. Two
+                // in swing range weighing more than the bot answers alone
+                // means the rest caught up: back to running, and the turn
+                // count stands so this cannot go on forever.
+                if (near.CloseAttackers >= 2 &&
+                    near.CloseWeight > RoomBudget(bot) * _nerve)
+                {
+                    if (CombatDebug)
+                    {
+                        Console.WriteLine(
+                            $"[Bot {bot.Name}] pack caught up — " +
+                            $"{near.CloseAttackers} in reach weighing " +
+                            $"{near.CloseWeight} (hp {bot.Hits}/{bot.HitsMax}, " +
+                            $"turn {_pickOffTurns}/{PickOffMaxTurns})");
+                    }
+                    StartFlee(bot, threat);
+                    return true;
+                }
+            }
+            else if (near.Attackers >= 2 && near.Weight > RoomBudget(bot) * 2 * _nerve)
             {
                 if (CombatDebug)
                 {

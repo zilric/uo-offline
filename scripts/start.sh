@@ -60,7 +60,9 @@ say()  { printf '\033[0;36m--> %s\033[0m\n' "$*"; log_line "--> $*"; }
 warn() { printf '\033[0;33m[WARN]\033[0m %s\n' "$*" >&2; log_line "[WARN] $*"; }
 die()  { printf '\033[0;31m[ERROR]\033[0m %s\n' "$*" >&2; log_line "[ERROR] $*"; gui_error "$*"; exit 1; }
 
-[[ -f "${DIST_DIR}/ModernUO.dll" ]] || die "ModernUO not built. Run install.sh first."
+if [[ "${UO_MODE:-}" != "join" ]] && [[ ! -f "${DIST_DIR}/ModernUO.dll" ]] && [[ ! -f "${INSTALL_ROOT}/play.json" ]]; then
+  die "ModernUO not built. Run install.sh first."
+fi
 
 # ---------------------------------------------------------------------------
 # Ask GitHub whether there is a newer UO Offline before starting anything.
@@ -79,6 +81,206 @@ if [[ -x "${UPDATER}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# How do you want to play? Asked every start (unless play.json says to
+# remember): by myself, host for friends, or join a friend. See
+# docs/FRIENDS.md. Scripted: UO_MODE=solo|host|join ./start.sh
+# ---------------------------------------------------------------------------
+PLAY_FILE="${INSTALL_ROOT}/play.json"
+CFG_FILE="${DIST_DIR}/Configuration/modernuo.json"
+MODE_FILE="${INSTALL_ROOT}/server-mode.txt"
+LIVE_DIR="${DIST_DIR}/Data/Live"
+
+json_str() { grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$1" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' || true; }
+json_raw() { grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[a-z0-9]+" "$1" 2>/dev/null | sed -E 's/.*:[[:space:]]*//' || true; }
+
+PLAY_MODE="solo"; PLAY_REMEMBER="false"; PLAY_ADDRESS=""; PLAY_USER=""; PLAY_PORT="${LISTEN_PORT}"
+if [[ -f "${PLAY_FILE}" ]]; then
+  _v="$(json_str "${PLAY_FILE}" mode)";       [[ -n "${_v}" ]] && PLAY_MODE="${_v}"
+  _v="$(json_raw "${PLAY_FILE}" remember)";   [[ -n "${_v}" ]] && PLAY_REMEMBER="${_v}"
+  _v="$(json_str "${PLAY_FILE}" address)";    [[ -n "${_v}" ]] && PLAY_ADDRESS="${_v}"
+  _v="$(json_str "${PLAY_FILE}" user)";       [[ -n "${_v}" ]] && PLAY_USER="${_v}"
+  _v="$(json_raw "${PLAY_FILE}" port)";       [[ -n "${_v}" ]] && PLAY_PORT="${_v}"
+  _v="$(json_str "${PLAY_FILE}" owner_user)"; [[ -n "${_v}" ]] && OWNER_USER="${_v}"
+  _v="$(json_str "${PLAY_FILE}" owner_pass)"; [[ -n "${_v}" ]] && OWNER_PASS="${_v}"
+  unset _v
+fi
+
+write_play() {
+  cat > "${PLAY_FILE}" <<EOF
+{
+  "mode": "${PLAY_MODE}",
+  "remember": ${PLAY_REMEMBER},
+  "address": "${PLAY_ADDRESS}",
+  "user": "${PLAY_USER}",
+  "port": ${PLAY_PORT},
+  "owner_user": "${OWNER_USER}",
+  "owner_pass": "${OWNER_PASS}"
+}
+EOF
+}
+
+have_gui() { [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; }
+
+ask_mode() {
+  local pick=""
+  if have_gui && command -v zenity >/dev/null 2>&1; then
+    pick="$(zenity --list --radiolist --title="UO Offline" --text="How do you want to play?" \
+      --column="" --column="Choice" --column="What it means" \
+      TRUE "Play by myself" "This PC only. Nobody else can connect." \
+      FALSE "Host for friends" "Friends can join your world while you play." \
+      FALSE "Join a friend" "Connect to a friend's world. No server here." \
+      --width=560 --height=260 2>/dev/null || true)"
+  elif have_gui && command -v kdialog >/dev/null 2>&1; then
+    pick="$(kdialog --title "UO Offline" --radiolist "How do you want to play?" \
+      solo "Play by myself (this PC only)" on \
+      host "Host for friends (they can join your world)" off \
+      join "Join a friend (connect to their world)" off 2>/dev/null || true)"
+  else
+    echo "How do you want to play?"
+    echo "  1) Play by myself   - this PC only"
+    echo "  2) Host for friends - friends can join your world"
+    echo "  3) Join a friend    - connect to a friend's world"
+    read -r -p "Choice [1]: " pick
+  fi
+  case "${pick}" in
+    ""|1|"Play by myself"|solo) echo "solo" ;;
+    2|"Host for friends"|host)   echo "host" ;;
+    3|"Join a friend"|join)      echo "join" ;;
+    *) echo "" ;;
+  esac
+}
+
+ask_join() {
+  # Sets JOIN_ADDR / JOIN_USER / JOIN_PASS, or returns 1 on cancel.
+  local dflt_user="${PLAY_USER:-${USER:-player}}"
+  if have_gui && command -v zenity >/dev/null 2>&1; then
+    local out
+    out="$(zenity --forms --title="UO Offline - join a friend" --text="Your friend's address is what friends.sh shows on their PC. Your name and password make your account on their world." \
+      --add-entry="Friend's address" --add-entry="Your name" --add-password="Password" --separator=$'\t' 2>/dev/null || true)"
+    [[ -n "${out}" ]] || return 1
+    JOIN_ADDR="$(printf '%s' "${out}" | cut -f1)"
+    JOIN_USER="$(printf '%s' "${out}" | cut -f2)"
+    JOIN_PASS="$(printf '%s' "${out}" | cut -f3)"
+    [[ -n "${JOIN_ADDR}" && -n "${JOIN_USER}" && -n "${JOIN_PASS}" ]] || { zenity --error --title="UO Offline" --text="All three are needed: the address, a name, and a password." 2>/dev/null || true; return 1; }
+    [[ -z "${JOIN_ADDR}" ]] && JOIN_ADDR="${PLAY_ADDRESS}"
+  elif have_gui && command -v kdialog >/dev/null 2>&1; then
+    JOIN_ADDR="$(kdialog --title "UO Offline" --inputbox "Your friend's address (friends.sh on their PC shows it):" "${PLAY_ADDRESS}" 2>/dev/null)" || return 1
+    JOIN_USER="$(kdialog --title "UO Offline" --inputbox "Your name on their world:" "${dflt_user}" 2>/dev/null)" || return 1
+    JOIN_PASS="$(kdialog --title "UO Offline" --password "Your password:" 2>/dev/null)" || return 1
+  else
+    read -r -p "Friend's address [${PLAY_ADDRESS}]: " JOIN_ADDR; JOIN_ADDR="${JOIN_ADDR:-${PLAY_ADDRESS}}"
+    read -r -p "Your name [${dflt_user}]: " JOIN_USER; JOIN_USER="${JOIN_USER:-${dflt_user}}"
+    read -r -s -p "Password: " JOIN_PASS; echo
+  fi
+  [[ -n "${JOIN_ADDR}" && -n "${JOIN_USER}" && -n "${JOIN_PASS}" ]]
+}
+
+gui_info() {
+  local msg="$1"
+  if have_gui && command -v zenity >/dev/null 2>&1; then
+    zenity --info --title="UO Offline" --no-wrap --text="${msg}" >/dev/null 2>&1 || true
+  elif have_gui && command -v kdialog >/dev/null 2>&1; then
+    kdialog --title "UO Offline" --msgbox "${msg}" >/dev/null 2>&1 || true
+  fi
+  printf '%s\n' "${msg}"
+}
+
+gui_yesno() {
+  local msg="$1"
+  if have_gui && command -v zenity >/dev/null 2>&1; then
+    zenity --question --title="UO Offline" --no-wrap --text="${msg}" >/dev/null 2>&1
+  elif have_gui && command -v kdialog >/dev/null 2>&1; then
+    kdialog --title "UO Offline" --yesno "${msg}" >/dev/null 2>&1
+  else
+    local a; read -r -p "${msg} [y/N] " a; [[ "${a}" =~ ^[Yy] ]]
+  fi
+}
+
+set_listener() {
+  [[ -f "${CFG_FILE}" ]] || return 0
+  sed -i -E "s/\"listeners\"[[:space:]]*:[[:space:]]*\[[^]]*\]/\"listeners\": [\"$1\"]/" "${CFG_FILE}"
+  sed -i -E 's/"serverListing\.autoDetect"[[:space:]]*:[[:space:]]*"[^"]*"/"serverListing.autoDetect": "false"/' "${CFG_FILE}"
+}
+
+set_client() {
+  local ip="$1" user="$2" pass="$3" f
+  for f in "${CLASSICUO_DIR}/settings.json" "${CLASSICUO_DIR}"/*/settings.json; do
+    [[ -f "$f" ]] || continue
+    sed -i -E "s/\"ip\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"ip\": \"${ip}\"/" "$f"
+    sed -i -E "s/\"username\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"username\": \"${user}\"/" "$f"
+    sed -i -E "s/\"password\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"password\": \"${pass}\"/" "$f"
+    sed -i -E "s/\"save_password\"[[:space:]]*:[[:space:]]*[a-z]+/\"save_password\": true/" "$f"
+  done
+}
+
+addresses_text() {
+  local line out="Friends connect to ONE of these (port ${LISTEN_PORT}):"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      100.*|*tailscale*|*zt*) out+=$'\n'"  From anywhere (Tailscale / ZeroTier):  ${line}" ;;
+      *)                      out+=$'\n'"  Same house / LAN:                      ${line}" ;;
+    esac
+  done < <( if command -v ip >/dev/null 2>&1; then ip -4 -o addr show scope global 2>/dev/null | awk '{print $4 "  (" $2 ")"}' | sed 's#/[0-9]*##'; else hostname -I 2>/dev/null | tr ' ' '\n'; fi )
+  out+=$'\n\n'"Friends pick 'Join a friend' when they start UO Offline and type the address."
+  out+=$'\n'"If a firewall is on here, open TCP ${LISTEN_PORT} (./friends.sh says how)."
+  printf '%s' "${out}"
+}
+
+CHOICE="${UO_MODE:-}"
+if [[ -z "${CHOICE}" ]]; then
+  if [[ "${PLAY_REMEMBER}" == "true" ]]; then CHOICE="${PLAY_MODE}"; else CHOICE="$(ask_mode)"; fi
+fi
+[[ -n "${CHOICE}" ]] || exit 0
+PLAY_MODE="${CHOICE}"
+
+JOIN_MODE=0
+case "${CHOICE}" in
+  join)
+    ask_join || exit 0
+    PLAY_ADDRESS="${JOIN_ADDR}"; PLAY_USER="${JOIN_USER}"; write_play
+    set_client "${JOIN_ADDR}" "${JOIN_USER}" "${JOIN_PASS}"
+    if ! timeout 5 bash -c "exec 3<>/dev/tcp/${JOIN_ADDR}/${PLAY_PORT}" 2>/dev/null; then
+      gui_error "Could not reach your friend's game at ${JOIN_ADDR}:${PLAY_PORT}.
+
+Check that their UO Offline is running and that they picked
+'Host for friends' (friends.sh on their PC shows the address),
+that the address is right, and that Tailscale is on if you use it."
+      die "Friend's game at ${JOIN_ADDR}:${PLAY_PORT} is not reachable."
+    fi
+    JOIN_MODE=1
+    ;;
+  host)
+    write_play
+    set_listener "0.0.0.0:${LISTEN_PORT}"
+    set_client "127.0.0.1" "${OWNER_USER}" "${OWNER_PASS}"
+    if [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+      _running="solo"; [[ -f "${MODE_FILE}" ]] && _running="$(tr -d '[:space:]' < "${MODE_FILE}")"
+      if [[ "${_running}" != "host" ]]; then
+        if gui_yesno "The server is already running for solo play, and hosting needs it restarted.
+Restart it now? The world is saved first; it takes about half a minute.
+No keeps playing by yourself this time."; then
+          mkdir -p "${LIVE_DIR}"; date +%s > "${LIVE_DIR}/shutdown_request.txt"
+          _pid="$(cat "${PIDFILE}")"
+          for _ in $(seq 1 60); do kill -0 "${_pid}" 2>/dev/null || break; sleep 1; done
+          if kill -0 "${_pid}" 2>/dev/null; then
+            gui_error "The server did not stop on request. Run ./stop.sh, then ./start.sh again."
+            die "Server did not stop."
+          fi
+          rm -f "${PIDFILE}"; sleep 2
+        fi
+      fi
+      unset _running _pid
+    fi
+    ;;
+  *)
+    PLAY_MODE="solo"; write_play
+    set_listener "127.0.0.1:${LISTEN_PORT}"
+    set_client "127.0.0.1" "${OWNER_USER}" "${OWNER_PASS}"
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
 # Already running?
 #
 # If the server is already up (user clicked the desktop icon twice, or
@@ -87,11 +289,16 @@ fi
 # whole session.
 # ---------------------------------------------------------------------------
 SERVER_WAS_ALREADY_RUNNING=0
-if [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+if [[ "${JOIN_MODE}" == "1" ]]; then
+  # Joining a friend: nothing to start here, and nothing to shut down after.
+  say "Joining a friend's game at ${PLAY_ADDRESS}:${PLAY_PORT}."
+  SERVER_WAS_ALREADY_RUNNING=1
+elif [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
   say "Server already running (pid $(cat "${PIDFILE}")). Launching client only."
   SERVER_WAS_ALREADY_RUNNING=1
 else
   cd "${DIST_DIR}"
+  printf '%s\n' "${CHOICE}" > "${MODE_FILE}"
 
   if [[ -f "${MARKER}" ]]; then
     # ---------------------------------------------------------------------
@@ -292,6 +499,10 @@ sync_client_version() {
   sed -i -E "s/(\"clientversion\"[[:space:]]*:[[:space:]]*\")[^\"]*(\")/\1${detected}\2/" "${settings_file}"
 }
 sync_client_version
+
+if [[ "${CHOICE}" == "host" ]]; then
+  gui_info "$(addresses_text)"
+fi
 
 # ---------------------------------------------------------------------------
 # Launch ClassicUO and wait for it.

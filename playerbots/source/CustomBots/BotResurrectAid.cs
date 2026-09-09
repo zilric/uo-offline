@@ -175,6 +175,18 @@ namespace Server.CustomBots
                 }
             }
 
+            // Raising a criminal inside a guarded town flags the helper, and
+            // the guards come for the helper next. The first thief caught at
+            // the Britain bank took the healer who raised it down with it.
+            if (ghost.Criminal && !RedTerritory.IsRed(aider))
+            {
+                var region = ghost.Region?.GetRegion<Server.Regions.GuardedRegion>();
+                if (region != null && !region.IsDisabled())
+                {
+                    return false;
+                }
+            }
+
             // The engine refuses a res where the body cannot stand up.
             if (ghost.Map.CanFit(ghost.Location, 16, false, false) != true)
             {

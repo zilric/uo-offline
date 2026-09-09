@@ -47,6 +47,7 @@ namespace Server.CustomBots
             switch (targetBehavior)
             {
                 case "BankSitter":
+                case "Thief":
                     return PlaceAtRandomBank(bot);
 
                 case "Adventurer":

@@ -74,6 +74,18 @@ namespace Server.CustomBots
         // Exit-mode: seek this level's up-teleporter and climb out.
         public bool ExitMode { get; private set; }
 
+        // Start in exit mode. A thief with no stairs it can route to hands
+        // itself to a crawler this way and lets the exit machinery, which
+        // knows the mislabeled stairs and the watchdog, carry it out.
+        public void ExitNow()
+        {
+            ExitMode = true;
+            _exitModeSince = Core.Now;
+            _lingering = false;
+            _route = null;
+            _targetPoint = null;
+        }
+
         // Camper: farms the first room it reaches for the whole run
         // instead of sweeping the floor. Rolled once per crawl.
         public bool Camper { get; private set; }
@@ -225,6 +237,12 @@ namespace Server.CustomBots
         // Rooms already cleared this run — unvisited rooms are strongly
         // preferred by RollPoint, so the crawl sweeps the floor. Cleared
         // when the bot changes floors.
+        // Rooms the bot backed out of, and when they may be rolled again.
+        // Visited only lowers a room's odds; a room full of ghouls has to be
+        // off the table outright for a while.
+        private readonly Dictionary<string, DateTime> _tooHot = new();
+        private static readonly TimeSpan TooHotFor = TimeSpan.FromMinutes(4);
+
         private readonly HashSet<string> _visited =
             new(StringComparer.OrdinalIgnoreCase);
 
@@ -732,6 +750,14 @@ namespace Server.CustomBots
             // -- 3. Roll the next point on this floor --
             var p = DungeonRegistry.RollPoint(
                 DungeonName, Level, bot.SkillTier, ExitMode, bot.Location, _visited);
+
+            // Not back into the room it just ran out of. A few re-rolls
+            // are enough; a floor with one room is a floor with one room.
+            for (int tries = 0; tries < 3 && p != null && IsTooHot(p.Name); tries++)
+            {
+                p = DungeonRegistry.RollPoint(
+                    DungeonName, Level, bot.SkillTier, ExitMode, bot.Location, _visited);
+            }
             _targetPoint = p;
 
             if (p == null)
@@ -817,6 +843,30 @@ namespace Server.CustomBots
             }
 
             return false;
+        }
+
+        private bool IsTooHot(string room) =>
+            room != null && _tooHot.TryGetValue(room, out var until) && Core.Now < until;
+
+        // Backed out of a room. Whatever the patrol was doing with that room
+        // is over: the linger ends, the route to it is dropped, and it stays
+        // off the roll for a while. The base behavior's flee carries the bot
+        // out; the next patrol pick goes somewhere else.
+        protected override void OnWithdrew(PlayerBot bot, Point3D room)
+        {
+            string name = _lingering
+                ? DungeonRegistry.NearestPointOnFloor(room, 12)?.Name
+                : _targetPoint?.Name;
+            if (name != null)
+            {
+                _tooHot[name] = Core.Now + TooHotFor;
+                _visited.Add(name);
+                Console.WriteLine(
+                    $"[DungeonCrawler] {bot.Name}: '{name}' is too hot, moving on");
+            }
+            _lingering = false;
+            _route = null;
+            _targetPoint = null;
         }
 
         // -------------------------------------------------------------------

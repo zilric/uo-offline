@@ -33,6 +33,9 @@ namespace Server.CustomBots
         // members carry the era shield and fight the other side ON SIGHT,
         // in town, guards ignoring it — exactly as T2A worked.
         public BotFaction Faction { get; init; } = BotFaction.None;
+        // Thieves only. Nobody rolls into it by the ordinary roll (its
+        // weight is zero); Thief-class bots join it on purpose.
+        public bool ThievesOnly { get; init; }
     }
 
     public static class BotGuilds
@@ -57,7 +60,50 @@ namespace Server.CustomBots
             new() { Name = "Trinsic Trading Company",     Tag = "TTC",  Weight = 0.8 },
             new() { Name = "The Merry Men",               Tag = "MM",   Weight = 0.6 },
             new() { Name = "Dread Lords of Nox",          Tag = "NOX",  Weight = 0.8, Faction = BotFaction.Chaos },
+            // The thieves' own. Every bank had one of these.
+            new() { Name = "The Thieves Guild",           Tag = "TG",   Weight = 0.0, ThievesOnly = true },
         };
+
+        // Odds a fresh thief joins the thieves guild, and odds one of the
+        // rest instead rolls an ordinary guild.
+        public const double ThiefJoinsChance = 0.60;
+        public const double ThiefOtherGuildChance = 0.15;
+
+        public static int ThievesGuildIndex
+        {
+            get
+            {
+                for (int i = 0; i < All.Length; i++)
+                {
+                    if (All[i].ThievesOnly)
+                    {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+        }
+
+        // Class-aware roll. Thieves mostly join their own guild; everyone
+        // else rolls the ordinary catalog, which the thieves guild's zero
+        // weight keeps them out of.
+        public static int RollMembership(BotClass cls)
+        {
+            if (cls != BotClass.Thief)
+            {
+                return RollMembership();
+            }
+            double r = Utility.RandomDouble();
+            if (r < ThiefJoinsChance)
+            {
+                return ThievesGuildIndex;
+            }
+            if (r < ThiefJoinsChance + ThiefOtherGuildChance)
+            {
+                return RollMembership();
+            }
+            return -1;
+        }
 
         private static readonly double _totalWeight = SumWeights();
 
@@ -82,15 +128,21 @@ namespace Server.CustomBots
 
             double r = Utility.RandomDouble() * _totalWeight;
             double acc = 0;
+            int last = -1;
             for (int i = 0; i < All.Length; i++)
             {
+                if (All[i].Weight <= 0)
+                {
+                    continue;
+                }
+                last = i;
                 acc += All[i].Weight;
                 if (r <= acc)
                 {
                     return i;
                 }
             }
-            return All.Length - 1;
+            return last;
         }
 
         // Safe lookup — returns null for -1 / stale indices from old saves.
