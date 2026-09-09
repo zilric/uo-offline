@@ -135,19 +135,17 @@ public static class DynamicClutterGenerator
 
         // Real resource stacks, not decoration standing in for the real
         // thing - a genuine 20-log pile, 20-board pile, 20-leather roll,
-        // 20-bolt cloth stack, a 500-ingot pile, and a granite chunk for
-        // the "stone" side of the brief (Granite has no stackable-amount
-        // constructor pre-ML - a single piece, not a pile). Every one of
-        // these is a real content class already used for
-        // StockTemplateEngine's own RawResources stock.
+        // 20-bolt cloth stack, and a 500-ingot pile. Every one of these is
+        // a real content class already used for StockTemplateEngine's own
+        // RawResources stock. SP-046: granite removed from the pool
+        // entirely per the ticket's stone-removal requirement.
         [MarketArchetype.RawResources] = new Func<Item>[]
         {
             () => new Log(20),
             () => new Board(20),
             () => new Leather(20),
             () => new BoltOfCloth(20),
-            () => new IronIngot(500),
-            () => new Granite()
+            () => new IronIngot(500)
         },
 
         // Dress form/mannequin (real Dressform class), spinning wheel and

@@ -643,8 +643,8 @@ public static class OrganicMarketSpawner
         (Point3D Spot, Direction Facing)? anchor
     )
     {
-        var vendors = new List<PlayerVendor>();
         var count = VendorCountFor(style);
+        var slots = new List<(Point3D Loc, Direction Facing)>();
 
         // SP-034: the primary vendor gets DynamicClutterGenerator's own
         // counter-anchored spot (1 tile behind the counter's center,
@@ -652,10 +652,10 @@ public static class OrganicMarketSpawner
         // instead of being just another entry from TryFindVendorSpots.
         if (anchor is { } primary)
         {
-            vendors.Add(SpawnOneVendor(authority, house, archetype, primary.Spot, primary.Facing, 0));
+            slots.Add((primary.Spot, primary.Facing));
         }
 
-        var remaining = count - vendors.Count;
+        var remaining = count - slots.Count;
         if (remaining > 0)
         {
             // Fetches up to `count` candidates, not just `remaining` -
@@ -666,21 +666,16 @@ public static class OrganicMarketSpawner
             var spots = InteriorTileFinder.TryFindVendorSpots(house, count);
             foreach (var (loc, facing) in spots)
             {
-                if (vendors.Count >= count)
+                if (slots.Count >= count)
                 {
                     break;
                 }
 
-                // SP-028: index threaded through to StockTemplateEngine.
-                // StockVendor as this vendor's own tier - see that file's
-                // header note on why a multi-vendor shop stocks three
-                // distinct tiers instead of the same items four times
-                // over.
-                vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, vendors.Count));
+                slots.Add((loc, facing));
             }
         }
 
-        if (vendors.Count == 0)
+        if (slots.Count == 0)
         {
             // Nothing on the floor plan qualified (a very small or oddly
             // shaped interior, or no door at all) - fall back to just
@@ -690,14 +685,35 @@ public static class OrganicMarketSpawner
             var loc = house.Sign?.Location ?? new Point3D(house.X, house.Y - 1, house.Z);
             var faceTarget = InteriorTileFinder.FrontDoorLocation(house) ?? house.BanLocation;
             var facing = InteriorTileFinder.DirectionTo(loc, faceTarget);
-            vendors.Add(SpawnOneVendor(authority, house, archetype, loc, facing, 0));
+            slots.Add((loc, facing));
+        }
+
+        // SP-048: the REAL final vendor count (never padded, may be less
+        // than VendorCountFor's own requested count on a cramped floor
+        // plan) has to be known before ANY vendor in this shop gets
+        // stocked - StockTemplateEngine.StockMageApothecary's own tier
+        // rules ("1-vendor shop", "2-vendor shop", "3+-vendor shop")
+        // depend on the shop's true total, not just this vendor's own
+        // index. That's why this is two passes: collect every slot this
+        // shop will actually get first, then spawn+stock each one now
+        // that the total is settled.
+        var vendorCount = slots.Count;
+        var vendors = new List<PlayerVendor>(vendorCount);
+        for (var i = 0; i < slots.Count; i++)
+        {
+            // SP-028: index threaded through to StockTemplateEngine.
+            // StockVendor as this vendor's own tier - see that file's
+            // header note on why a multi-vendor shop stocks three
+            // distinct tiers instead of the same items four times over.
+            vendors.Add(SpawnOneVendor(authority, house, archetype, slots[i].Loc, slots[i].Facing, i, vendorCount));
         }
 
         return vendors;
     }
 
     private static PlayerVendor SpawnOneVendor(
-        Mobile authority, BaseHouse house, MarketArchetype archetype, Point3D loc, Direction facing, int vendorIndex
+        Mobile authority, BaseHouse house, MarketArchetype archetype, Point3D loc, Direction facing,
+        int vendorIndex, int vendorCount
     )
     {
         var vendor = new PlayerVendor(authority, house)
@@ -730,16 +746,20 @@ public static class OrganicMarketSpawner
         // its shirt or boots.
         NameWornApparel(vendor);
 
-        StockTemplateEngine.StockVendor(vendor, archetype, vendorIndex);
+        // SP-049: StockVendor returns the effective slot it actually
+        // stocked as (vendorCount==1 shops roll this randomly, see
+        // StockTemplateEngine.DetermineEffectiveSlot) - ApplyVendorTheme
+        // is handed that SAME value rather than re-deriving it, so
+        // title/apparel can never land on a different tier than the
+        // stock that was actually dropped in.
+        var effectiveSlot = StockTemplateEngine.StockVendor(vendor, archetype, vendorIndex, vendorCount);
 
         // SP-033/SP-034: slot-specific themed apparel/title, equipped AFTER
         // stock so it's the last thing to touch the vendor's own Items list
         // this spawn - NameWornApparel below has to run after it, not
         // before, or the new pieces it just equipped would still show up
-        // unnamed. vendorIndex threads through so a shop's own Vendor 1..4
-        // each get the title/apparel matching what THAT slot actually
-        // sells, not one title per archetype.
-        StockTemplateEngine.ApplyVendorTheme(vendor, archetype, vendorIndex);
+        // unnamed.
+        StockTemplateEngine.ApplyVendorTheme(vendor, archetype, effectiveSlot);
         NameWornApparel(vendor);
 
         // SP-053: fresh stock has no positional layout of its own

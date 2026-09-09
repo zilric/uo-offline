@@ -415,13 +415,25 @@ public partial class MerchantGuildAuthority : Mobile
                 logger.Information("RestockHouseVendors: restock cycle starting for house slot {Slot} ({Archetype})", i, a);
             }
 
+            // SP-049: house.PlayerVendors.Count is this shop's real,
+            // already-settled total - the universal 1-vendor-shop 50/50
+            // roll (StockTemplateEngine.DetermineEffectiveSlot) needs it
+            // every restock, not just at initial spawn.
+            var vendorCount = house.PlayerVendors.Count;
             var vendorIndex = 0;
             foreach (var v in house.PlayerVendors)
             {
                 if (v is { Deleted: false })
                 {
                     ClearVendorStock(v);
-                    StockTemplateEngine.StockVendor(v, a, vendorIndex);
+                    // SP-049: a vendor's effective slot (and therefore its
+                    // tier) can change on every restock - the returned
+                    // value is threaded straight into ApplyVendorTheme so
+                    // title/apparel always match whatever tier just got
+                    // stocked, the same guarantee the initial spawn path
+                    // (OrganicMarketSpawner.SpawnOneVendor) already has.
+                    var effectiveSlot = StockTemplateEngine.StockVendor(v, a, vendorIndex, vendorCount);
+                    StockTemplateEngine.ApplyVendorTheme(v, a, effectiveSlot);
                     VendorGridArranger.Arrange(v); // SP-053: re-arrange fresh restock
                     v.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
                     v.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
@@ -501,7 +513,11 @@ public partial class MerchantGuildAuthority : Mobile
         }
 
         ClearVendorStock(vendor);
-        StockTemplateEngine.StockVendor(vendor, a, vendorIndex);
+        var vendorCount = house.PlayerVendors.Count;
+        // SP-049: keep title/apparel in sync - see RestockHouseVendors'
+        // own comment on why this can change on every restock.
+        var effectiveSlot = StockTemplateEngine.StockVendor(vendor, a, vendorIndex, vendorCount);
+        StockTemplateEngine.ApplyVendorTheme(vendor, a, effectiveSlot);
         VendorGridArranger.Arrange(vendor); // SP-053: re-arrange fresh restock
         vendor.HoldGold = OrganicMarketSpawner.VendorCommissionCeiling;
         vendor.BankAccount = OrganicMarketSpawner.VendorCommissionCeiling;
