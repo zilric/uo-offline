@@ -1,12 +1,7 @@
-I hope you are all having fun! I am going to do more large updates rather than a lot of smaller ones, so expect updates every week or 2. As always, if you have bugs to report or even suggestions, message me on reddit or GitHub.
+I know I said updates would slow down but I got a few features done over the weekend that I think people will enjoy. Some of these are bigger features so you will probably run into a few bugs.
 
 Recent Updates
--Play with friends. Clicking UO Offline now asks: play by myself, host for friends, or join a friend. Hosting lets friends into your world (LAN, or Tailscale from anywhere); joining connects you to theirs. See docs/FRIENDS.md.
--You can recruit bots into your own guild at the guildstone. They join, wear your tag, and stay on the server for good (they survive restarts). Guild chat works, and "anyone wanna group up" in guild chat makes guild bots recall to you and join your party. Guild bots also chat in guild chat on their own, answer "what is everyone doing" with what they are really doing, and sometimes ask for a group themselves.
--Thief bots actually steal now. They work banks and taverns, pick pockets (yours too), sometimes sneak up hidden, bank every lift, mostly run with The Thieves Guild [TG], work dungeons without fighting, run and hide when caught, and get guard whacked if caught next to a banker.
--Bots were using magic arrow and not kiting enough when attacking each other. They should back off and use stronger spells now.
--Bots were getting ressed by nothing after standing around. They now seek out a wandering healer, go to an ankh, or get ressed by another friendly bot.
--Random bots partying up wasn't happening often. Larger parties (3-5) will form up and help each other against reds and monsters, and res each other.
--The gossip system was tweaked. Bots will no longer yell "red in [place]" while they are fighting said red, etc.
--Made an in-game waypoint overlay to see how the bots would travel.
--Still slowly working on the dungeon waypoint system.
+-You can play with friends! Starting up will now ask play by myself, host for friend, or join a friend. Read FRIENDS.MD under /docs will help explain how to play with each other.
+-You can now build a guild. Invite bots to join your guild and they will persist throughout. Basic chat in guild chat. Ask if anyone wants to group up, guild mates will recall to you to group up and adventure.
+-Thieves! New thief bots will steal from other bots and you. There is now a guild out there made just of thieves.
+-Combat improvements
