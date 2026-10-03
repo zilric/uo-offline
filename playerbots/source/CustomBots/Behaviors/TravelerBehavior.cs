@@ -3382,7 +3382,7 @@ private bool ZoneArrival(PlayerBot bot, int fallbackRange)
                 }
             }
 
-            bool arrivedLeg = _follower.Follow(followRange);
+            bool arrivedLeg = _follower.Follow(_running, followRange);
 
             // Did that step carry us onto the entrance teleporter? If so the
             // game already moved us inside — convert and stop.
