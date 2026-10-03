@@ -58,6 +58,23 @@ done
 INSTALL_MAP_EDITOR="${INSTALL_MAP_EDITOR:-1}"
 unset _arg_i _next
 
+# With no root given, follow the desktop launcher to the install the player
+# actually uses. The launcher's update button runs this from a temp folder,
+# and launchers from before 2026-09-21 did not pass --install-root, so an
+# install anywhere but ~/uo-modernuo got a second, empty one with no
+# accounts.
+if [[ -z "${INSTALL_ROOT:-}" ]]; then
+  _launcher="${HOME}/.local/share/applications/UO-Offline.desktop"
+  if [[ -f "${_launcher}" ]]; then
+    _exec="$(sed -n 's/^Exec=//p' "${_launcher}" | head -n1)"
+    _dir="${_exec%/start.sh}"
+    if [[ "${_dir}" != "${_exec}" && -f "${_dir}/start.sh" ]]; then
+      INSTALL_ROOT="${_dir}"
+    fi
+  fi
+  unset _launcher _exec _dir
+fi
+
 INSTALL_ROOT="${INSTALL_ROOT:-${HOME}/uo-modernuo}"
 INSTALL_ROOT="${INSTALL_ROOT%/}"
 
@@ -493,31 +510,62 @@ unpack_uo_exe() {
   warn "It is a WinRAR (RAR5) self-extracting archive. p7zip cannot read RAR"
   warn "at all, and unar cannot see past the stub. Install one that can and"
   warn "re-run this script:"
-  warn "    Debian/Ubuntu:  sudo apt install unrar     (or: 7zip)"
+  warn "    Ubuntu:         sudo add-apt-repository multiverse && sudo apt install unrar"
+  warn "    Debian:         enable non-free, then: sudo apt install unrar"
   warn "    Fedora:         sudo dnf install unrar     (or: p7zip-plugins)"
   warn "    Arch/SteamOS:   sudo pacman -S unrar"
   return 1
 }
 
-# One extraction attempt. Judged by whether the data files actually appeared,
+# One extraction attempt. Judged by whether a COMPLETE data set came out,
 # never by the exit code -- 7z "succeeds" while failing every file with
-# "Unsupported Method", which is how this went unnoticed in the first place.
+# "Unsupported Method".
+#
+# Judging by "art.mul exists" was not enough either. p7zip creates every
+# file it lists, then fails to fill it, so a 0-byte art.mul counted as a
+# win. That stopped the loop before unrar or unar ever ran, and the user got
+# "extraction is incomplete" on every stock Debian/Ubuntu box. So each
+# attempt goes into its own empty staging folder, is checked with
+# uo_data_problem, and is thrown away if it is not whole.
 run_extractor() {
   local tool="$1" archive="$2" dest="$3"
+  local stage="${dest}/.extract-${tool}"
+
+  rm -rf "${stage}"
+  mkdir -p "${stage}"
 
   case "${tool}" in
     # -D stops unar wrapping everything in a folder named after the archive;
     # the payload already carries its own version folder.
-    unar)  unar -q -f -D -o "${dest}" "${archive}" >/dev/null 2>&1 || true ;;
-    unrar) unrar x -y -inul "${archive}" "${dest}/" >/dev/null 2>&1 || true ;;
-    *)     "${tool}" x -y "-o${dest}" "${archive}" >/dev/null 2>&1 || true ;;
+    unar)  unar -q -f -D -o "${stage}" "${archive}" >/dev/null 2>&1 || true ;;
+    unrar) unrar x -y -inul "${archive}" "${stage}/" >/dev/null 2>&1 || true ;;
+    *)     "${tool}" x -y "-o${stage}" "${archive}" >/dev/null 2>&1 || true ;;
   esac
 
-  if [[ -n "$(find "${dest}" -maxdepth 3 -name art.mul -print -quit 2>/dev/null)" ]]; then
-    ok "Extracted with ${tool}."
-    return 0
+  local art why
+  art="$(find "${stage}" -maxdepth 3 -name art.mul -print -quit 2>/dev/null)"
+  if [[ -z "${art}" ]]; then
+    rm -rf "${stage}"
+    return 1
   fi
-  return 1
+  if ! why="$(uo_data_problem "$(dirname "${art}")")"; then
+    warn "${tool} left an incomplete copy (${why})."
+    rm -rf "${stage}"
+    return 1
+  fi
+
+  # Good copy. Move it up into dest, replacing anything a failed earlier
+  # run left behind under the same name.
+  local item
+  for item in "${stage}"/* "${stage}"/.[!.]*; do
+    [[ -e "${item}" ]] || continue
+    rm -rf "${dest}/$(basename "${item}")"
+    mv "${item}" "${dest}/"
+  done
+  rm -rf "${stage}"
+
+  ok "Extracted with ${tool}."
+  return 0
 }
 
 # Byte offset of the RAR5 signature inside the self-extractor, or empty.
@@ -1383,6 +1431,22 @@ install_playerbots() {
     say "PlayerBot sources unchanged. Skipping deploy."
     return
   fi
+
+  # Copy what is there now before overwriting it. An update replaces the
+  # bot code and data wholesale, including zones, waypoints and destinations
+  # the player drew in the map editor. Nothing is lost if it is in here.
+  local backup_dir="${INSTALL_ROOT}/backups/$(date +%Y%m%d-%H%M%S)"
+  if [[ -d "${src_target}" ]]; then
+    mkdir -p "${backup_dir}"
+    cp -r "${src_target}" "${backup_dir}/CustomBots"
+  fi
+  for sub in Destinations Waypoints Zones PlayerBotChat; do
+    if [[ -d "${DIST_DIR}/Data/${sub}" ]]; then
+      mkdir -p "${backup_dir}/Data"
+      cp -r "${DIST_DIR}/Data/${sub}" "${backup_dir}/Data/${sub}"
+    fi
+  done
+  [[ -d "${backup_dir}" ]] && say "Backed up the current bots and bot data to ${backup_dir}"
 
   say "Deploying bot source -> ${src_target}"
   mkdir -p "${src_target}"

@@ -165,7 +165,8 @@ namespace Server.CustomBots
 
         // ---- State ----
         private Point3D? _goal;
-        private PathFollower _follower;
+        private ILegFollower _follower;
+        public override ILegFollower ActiveLegFollower => _follower;
         private bool _running;
         // Last known mount state — combined with _running to decide if the
         // step timer needs to restart at a different rate.
@@ -845,6 +846,23 @@ namespace Server.CustomBots
                 // move it — wedged in rock/decor; extract it, since no
                 // goal choice can ever free a bot the engine won't move.
                 _patrolStuckStreak++;
+                // Inside a drawn dungeon floor, say what the bot was trying
+                // to do when it stuck: the goal, the walker, and whether the
+                // mesh thinks the goal is reachable. This is how a wall the
+                // outline straddles gets found.
+                if (_goal != null && ZoneRegistry.DungeonZoneAt(bot.Location) != null)
+                {
+                    string walker = _follower switch
+                    {
+                        ZoneFollower zf => zf.OnMesh ? "zones" : $"engine after zones ({zf.FallbackReason})",
+                        EnginePathFollower => "engine",
+                        null => "none",
+                        _ => "other",
+                    };
+                    Console.WriteLine($"[patrol_stuck] {bot.Name} at ({bot.X},{bot.Y},{bot.Z}) goal ({_goal.Value.X},{_goal.Value.Y}) " +
+                                      $"walker {walker} connected {ZoneRegistry.ZoneConnected(bot.Location, _goal.Value)} " +
+                                      $"streak {_patrolStuckStreak} {SerializableName}");
+                }
                 _goal = null;
                 _follower = null;
                 _lastProgressAt = Core.Now;
@@ -899,7 +917,8 @@ namespace Server.CustomBots
                 _follower = null;
             }
 
-            bool reached = _goal != null && bot.InRange(_goal.Value, ArrivalRange);
+            bool reached = _goal != null &&
+                           (bot.InRange(_goal.Value, ArrivalRange) || PatrolGoalReachedEarly(bot, _goal.Value));
 
             // Reached the current goal — give a subclass first refusal. A
             // DungeonCrawler uses this to fire a level transition when it
@@ -946,13 +965,22 @@ namespace Server.CustomBots
                         _goal = new Point3D(tx, ty, bot.Z);
                     }
                 }
-                _follower = new PathFollower(bot, _goal.Value);
+                _follower = LegFollowers.Create(bot, _goal.Value, ZoneWalkOverride(bot, _goal.Value));
             }
             else if (_follower == null)
             {
-                _follower = new PathFollower(bot, _goal.Value);
+                _follower = LegFollowers.Create(bot, _goal.Value, ZoneWalkOverride(bot, _goal.Value));
             }
         }
+
+        // Whether a patrol leg walks the painted mesh. Null follows the
+        // fleet mode; a crawler answers true inside drawn dungeon floors.
+        protected virtual bool? ZoneWalkOverride(PlayerBot bot, Point3D goal) => null;
+
+        // A subclass can call a goal reached before the bot is within
+        // ArrivalRange of it: a crawler inside a drawn room outline is at
+        // the room, wherever the room point sits.
+        protected virtual bool PatrolGoalReachedEarly(PlayerBot bot, Point3D goal) => false;
 
         // ---- Patrol extension hooks (used by DungeonCrawlerBehavior) ----
         //
@@ -1976,7 +2004,7 @@ namespace Server.CustomBots
             if (_goal != goal || _follower == null)
             {
                 _goal = goal;
-                _follower = new PathFollower(bot, goal);
+                _follower = LegFollowers.Create(bot, goal, ZoneWalkOverride(bot, goal));
             }
             EnsureStepTimer(bot, running);
         }
@@ -3456,7 +3484,14 @@ namespace Server.CustomBots
                 return;
             }
 
-            bool arrived = _follower.Follow(ArrivalRange);
+            bool arrived = _follower.Follow(_running, ArrivalRange);
+            // Inside a drawn room outline counts as there, checked per step:
+            // a 2-second decision tick is too slow to catch the outline
+            // before the bot is on top of the point anyway.
+            if (!arrived && _goal != null && PatrolGoalReachedEarly(bot, _goal.Value))
+            {
+                arrived = true;
+            }
             if (arrived)
             {
                 // Reached current goal. KEEP _goal set — the decision tick's

@@ -123,9 +123,29 @@ function Set-InstallRoot {
   $script:PythonDir    = [IO.Path]::Combine($Path, "python")
 }
 
-# The default is the same place it has always been.
+# The install the "UO Offline" desktop shortcut starts, if there is one.
+#
+# The launcher's Update Now button runs this installer from a temp folder.
+# Launchers from before 2026-09-21 did not pass -InstallPath, so an install
+# in a folder the player picked got a second, empty install at the default
+# instead: no accounts, a new owner prompt. Those launchers are still out
+# there, so with no -InstallPath the installer follows the shortcut to the
+# install the player actually uses.
+function Find-ShortcutInstall {
+  try {
+    $lnkPath = [IO.Path]::Combine([Environment]::GetFolderPath("Desktop"), "UO Offline.lnk")
+    if (-not (Test-Path -LiteralPath $lnkPath)) { return $null }
+    $dir = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath).WorkingDirectory
+    if ($dir -and (Test-Path -LiteralPath ([IO.Path]::Combine($dir, "start.ps1")))) { return $dir }
+  } catch { }
+  return $null
+}
+
+# Otherwise the default is the same place it has always been.
 if ($InstallPath) {
   Set-InstallRoot $InstallPath
+} elseif ($found = Find-ShortcutInstall) {
+  Set-InstallRoot $found
 } else {
   Set-InstallRoot (Join-Path $env:USERPROFILE "uo-modernuo")
 }
@@ -498,6 +518,26 @@ function InstallPlayerBots {
   if (-not (Test-Path $srcDir)) { Warn "No playerbots\ next to install.ps1; skipping bot install."; return }
 
   $srcTarget = Join-Path $ModernUODir "Projects\UOContent\CustomBots"
+
+  # Copy what is there now before overwriting it. An update replaces the
+  # bot code and data wholesale, including zones, waypoints and destinations
+  # the player drew in the map editor. Nothing is lost if it is in here.
+  $backupDir = [IO.Path]::Combine($InstallRoot, "backups", (Get-Date -Format "yyyyMMdd-HHmmss"))
+  $backedUp = $false
+  if (Test-Path $srcTarget) {
+    New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    Copy-Item -Recurse -Force $srcTarget (Join-Path $backupDir "CustomBots")
+    $backedUp = $true
+  }
+  foreach ($sub in @("Destinations","Waypoints","Zones","PlayerBotChat")) {
+    $cur = Join-Path $DistDir "Data\$sub"
+    if (Test-Path $cur) {
+      New-Item -ItemType Directory -Force -Path (Join-Path $backupDir "Data") | Out-Null
+      Copy-Item -Recurse -Force $cur (Join-Path $backupDir "Data\$sub")
+      $backedUp = $true
+    }
+  }
+  if ($backedUp) { Ok "Backed up the current bots and bot data to $backupDir" }
 
   Say "Deploying bot source -> $srcTarget"
   New-Item -ItemType Directory -Force -Path $srcTarget | Out-Null
@@ -1441,7 +1481,24 @@ if (-not $NoRun) {
     foreach ($step in $script:InstallSteps) { & $step.Run }
     Finish
   } catch {
-    Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    $msg = $_.Exception.Message
+    Write-Host "[ERROR] $msg" -ForegroundColor Red
+
+    # Update Now runs this in its own window, and the window closed the
+    # moment the error printed, before anyone could read it. Keep a copy
+    # on disk and hold the window open.
+    $logPath = $null
+    try {
+      $logPath = Join-Path $InstallRoot "install-error.log"
+      New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+      "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $msg`r`n$($_.ScriptStackTrace)" |
+        Set-Content -Path $logPath -Encoding UTF8
+      Write-Host "The error was saved to $logPath"
+    } catch { }
+    if (-not [Console]::IsInputRedirected) {
+      Write-Host ""
+      Read-Host "Press Enter to close" | Out-Null
+    }
     exit 1
   }
 }

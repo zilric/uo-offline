@@ -31,6 +31,10 @@ TIMEOUT=6
 
 TITLE="UO Offline - update available"
 
+# A development install, where the bots are being worked on. An update would
+# copy the released code and data over the unreleased work, so never offer one.
+[[ -f "${INSTALL_ROOT}/dev-install.txt" ]] && exit 0
+
 # Nothing to compare against, or no way to ask: launch the game.
 [[ -f "${STAMP}" ]] || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
@@ -99,6 +103,18 @@ BODY="${CHANGELOG}
 Updating re-runs the installer, which rebuilds the server with the new
 bots. Your world, characters and accounts are kept."
 
+# A line written as **like this** in the notes shows in bold. Each prompt
+# gets its own copy: kdialog and zenity read <b> markup (so & < > must be
+# escaped, and kdialog needs <br> for line breaks once it sees a tag), the
+# terminal uses ANSI bold.
+BOLD_RE='^[[:space:]]*\*\*\(.*\)\*\*[[:space:]]*$'
+BODY_MARKUP="$(printf '%s\n' "${BODY}" \
+  | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' \
+        -e "s/${BOLD_RE}/<b>\1<\/b>/")"
+BODY_HTML="$(printf '%s\n' "${BODY_MARKUP}" | sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/<br>/g')"
+BODY_TERM="$(printf '%s\n' "${BODY}" \
+  | sed -e "s/${BOLD_RE}/$(printf '\033')[1m\1$(printf '\033')[0m/")"
+
 # -------------------------------------------------------------------------
 # ask -> prints one of: update | play | skip
 # -------------------------------------------------------------------------
@@ -110,7 +126,7 @@ ask() {
             --yes-label "Update Now" \
             --no-label "Play Now" \
             --cancel-label "Skip This Version" \
-            --yesnocancel "${BODY}" >/dev/null 2>&1
+            --yesnocancel "${BODY_HTML}" >/dev/null 2>&1
     case $? in
       0) printf 'update' ;;
       1) printf 'play'   ;;
@@ -122,7 +138,7 @@ ask() {
   if have_gui && command -v zenity >/dev/null 2>&1; then
     local extra
     extra="$(zenity --question --title="${TITLE}" --no-wrap \
-              --text="${BODY}" \
+              --text="${BODY_MARKUP}" \
               --ok-label="Update Now" --cancel-label="Play Now" \
               --extra-button="Skip This Version" 2>/dev/null)"
     local rc=$?
@@ -136,7 +152,7 @@ ask() {
   # Terminal prompt. Only when someone is actually there to read it.
   if [[ -t 0 && -t 1 ]]; then
     printf '\n\033[0;36m=========================================================\033[0m\n' >&2
-    printf '%s\n' "${BODY}" >&2
+    printf '%s\n' "${BODY_TERM}" >&2
     printf '\033[0;36m=========================================================\033[0m\n' >&2
     printf '  [u] update now    [p] play now    [s] skip this version\n' >&2
     local reply=""
@@ -188,19 +204,26 @@ if [[ -z "${INSTALLER}" ]]; then
 fi
 chmod +x "${INSTALLER}" 2>/dev/null
 
+# --install-root is the folder this script lives in, the install being
+# updated. Without it install.sh falls back to ~/uo-modernuo, and anyone who
+# installed somewhere else got a second, empty install with no accounts.
+# Passed on the command line, not through the environment, because
+# gnome-terminal runs its shells from a server that never sees our env.
+ROOT_Q="$(printf '%q' "${INSTALL_ROOT}")"
+
 # In a terminal, just run it here so the player watches the build. Launched
 # from the desktop icon there is no terminal, so open one - the rebuild
 # takes minutes and a silent background job looks like nothing happened.
 if [[ -t 1 ]]; then
-  ( cd "$(dirname "${INSTALLER}")" && bash "${INSTALLER}" )
+  ( cd "$(dirname "${INSTALLER}")" && bash "${INSTALLER}" --install-root "${INSTALL_ROOT}" )
   exit 10
 fi
 
 for term in konsole gnome-terminal xfce4-terminal x-terminal-emulator xterm; do
   command -v "${term}" >/dev/null 2>&1 || continue
   case "${term}" in
-    gnome-terminal) "${term}" -- bash -lc "cd '$(dirname "${INSTALLER}")' && bash '${INSTALLER}'; echo; read -r -p 'Done. Press Enter to close.'" & ;;
-    *)              "${term}" -e bash -lc "cd '$(dirname "${INSTALLER}")' && bash '${INSTALLER}'; echo; read -r -p 'Done. Press Enter to close.'" & ;;
+    gnome-terminal) "${term}" -- bash -lc "cd '$(dirname "${INSTALLER}")' && bash '${INSTALLER}' --install-root ${ROOT_Q}; echo; read -r -p 'Done. Press Enter to close.'" & ;;
+    *)              "${term}" -e bash -lc "cd '$(dirname "${INSTALLER}")' && bash '${INSTALLER}' --install-root ${ROOT_Q}; echo; read -r -p 'Done. Press Enter to close.'" & ;;
   esac
   exit 10
 done

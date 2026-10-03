@@ -58,6 +58,7 @@ Built on [ModernUO](https://github.com/modernuo/ModernUO) and [ClassicUO](https:
 
 Newest first.
 
+- **Draw where bots walk, and shops that sell.** In the map editor you can now draw walk zones (streets, plazas, docks) and bots walk straight through them instead of the engine's 38-tile path box, crossing between zones where the shapes touch. Draw a vendor's shop floor and bots walk in, browse the floor, and buy real items from the real vendor with their own gold. Tag a walk zone as a dungeon floor and any bot that steps into it becomes a dungeon crawler that routes through your zones to the rooms and stairs. `[NavShow` draws the zones in-game. See [docs/NAVMESH-DESIGN-BRIEF.md](docs/NAVMESH-DESIGN-BRIEF.md).
 - **Play with friends.** Clicking UO Offline now asks how you want to play: by yourself, host for friends, or join a friend. Hosting lets friends into your world over the LAN or, from anywhere, over Tailscale; joining connects the game to a friend's PC. See [docs/FRIENDS.md](docs/FRIENDS.md).
 - **Recruit bots into your guild.** Recruit a bot at your guildstone and it joins, wears your tag, and stays on the shard for good, restarts included. Guild chat works now: the bots chatter in it, say what they are doing when asked, and "anyone wanna group up" brings guildmates recalling to you to join your party.
 - **Thieves pick pockets.** Thief bots steal from bots and from you with the real Stealing skill, at banks, taverns and in dungeons, sometimes creeping up hidden. A caught thief runs and hides, or dies to the guards if it was next to a banker. Most of them run with The Thieves Guild [TG], a bot guild only thieves roll into.
@@ -234,7 +235,7 @@ Double-click the **UO Offline** desktop icon. It starts the server, opens the ga
 
 The world starts empty. To fill it:
 
-**1.** Type `[GmPanel` to open the GM panel and click **★ First Time Setup**. That one button lays down decor, signs, teleporters, moongates, town criers, the monster and vendor spawners, and the whole player bot population — town and road bots plus the reds — then saves. It is safe to run again later.
+**1.** Type `[GmPanel` to open the GM panel and click **★ First Time Setup**. That one button lays down decor, doors, signs, teleporters, moongates, town criers, the monster and vendor spawners, and the whole player bot population — town and road bots plus the reds — then saves. It is safe to run again later.
 
 **2.** That's all. The Lifecycle system takes over from there.
 
