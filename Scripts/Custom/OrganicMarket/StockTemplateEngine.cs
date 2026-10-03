@@ -2950,7 +2950,7 @@ public static class StockTemplateEngine
                 }
                 break;
 
-            case 2: // Tier 3: Cellar Master & Tavern Provisioner
+            case 2: // Tier 3: Deep-Sea Salvager & Tavern Provisioner
                 for (var i = Utility.RandomMinMax(2, 3); i > 0; i--)
                 {
                     SellLoose(vendor, Named(new Keg(), "a keg of ale"), 250);
@@ -2986,9 +2986,24 @@ public static class StockTemplateEngine
                     var beverage = Utility.RandomList(BeverageType.Liquor, BeverageType.Ale, BeverageType.Wine);
                     SellLoose(vendor, new Pitcher(beverage), 20);
                 }
+
+                // SP-060: T2A High-Seas Salvage - real, non-stackable
+                // classes (no Amount clamp needed, neither sets
+                // Stackable = true), same as this tier's own pre-existing
+                // Pitcher/Keg items above.
+                for (var i = Utility.RandomMinMax(1, 2); i > 0; i--)
+                {
+                    SellLoose(vendor, new MessageInABottle(), 2500);
+                }
+
+                var netCount = Utility.RandomDouble() < 0.25 ? 2 : 1;
+                for (var i = 0; i < netCount; i++)
+                {
+                    SellLoose(vendor, new SpecialFishingNet(), 3250);
+                }
                 break;
 
-            default: // Tier 4: Grand Shipwright & Nautical Explorer
+            default: // Tier 4: Grand Shipwright & Maritime Trophy Merchant
                 SellLoose(vendor, new SmallBoatDeed(), 12500);
                 SellLoose(vendor, new SmallDragonBoatDeed(), 15000);
                 SellLoose(vendor, new MediumBoatDeed(), 18000);
@@ -3007,6 +3022,14 @@ public static class StockTemplateEngine
                 {
                     SellLoose(vendor, new Sextant(), 120);
                 }
+
+                // SP-060: T2A trophy - a real TaxidermyKit (the ticket's
+                // own offered alternative to a hand-built mounted-fish
+                // deed/addon; TrophyDeed's own real BigFish table lives
+                // as a private field inside TaxidermyKit, not otherwise
+                // constructible without duplicating its internal
+                // ItemID/cliloc numbers).
+                SellLoose(vendor, Named(new TaxidermyKit(), "a taxidermy kit"), 3500);
                 break;
         }
     }
@@ -3092,8 +3115,11 @@ public static class StockTemplateEngine
             // Fisher/Tavern Cook order).
             (MarketArchetype.FisherCurioBaker, 0) => (FisherMasterBakerApparel(), "the Master Baker & Provisioner"),
             (MarketArchetype.FisherCurioBaker, 1) => (FisherFishmongerCartographerApparel(), "the Fishmonger & Cartographer"),
-            (MarketArchetype.FisherCurioBaker, 2) => (FisherCellarMasterApparel(), "the Cellar Master & Tavern Provisioner"),
-            (MarketArchetype.FisherCurioBaker, _) => (FisherGrandShipwrightApparel(), "the Grand Shipwright & Nautical Explorer"),
+            // SP-060: titles updated to the ticket's own T2A-flavored
+            // names; apparel content/function names unchanged (already
+            // generic tavern/nautical gear, still fits).
+            (MarketArchetype.FisherCurioBaker, 2) => (FisherCellarMasterApparel(), "the Deep-Sea Salvager & Tavern Provisioner"),
+            (MarketArchetype.FisherCurioBaker, _) => (FisherGrandShipwrightApparel(), "the Grand Shipwright & Maritime Trophy Merchant"),
 
             _ => (Array.Empty<Item>(), null)
         };
