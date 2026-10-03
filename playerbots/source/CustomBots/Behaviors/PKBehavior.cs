@@ -525,6 +525,9 @@ namespace Server.CustomBots
 
             BeginAmbushAt(bot, pick);
             int crew = 1;
+            // Snapshot first: BeginAmbushAt reconfigures another bot while
+            // we'd still be walking the live spatial enumeration.
+            var recruits = new List<PlayerBot>();
             foreach (var m in bot.GetMobilesInRange(30))
             {
                 if (m is PlayerBot mate && mate != bot &&
@@ -533,9 +536,17 @@ namespace Server.CustomBots
                     pk._ambushSpot == Point3D.Zero && pk._hunt == null &&
                     !DungeonRegistry.IsInDungeon(mate))
                 {
-                    pk.BeginAmbushAt(mate, pick);
-                    crew++;
+                    recruits.Add(mate);
                 }
+            }
+            foreach (var mate in recruits)
+            {
+                if (mate.Deleted || mate.Behavior is not PKBehavior pk)
+                {
+                    continue;
+                }
+                pk.BeginAmbushAt(mate, pick);
+                crew++;
             }
             Console.WriteLine(
                 $"[pk] {bot.Name} leads {crew} red(s) to ambush '{pick.Name}'");
@@ -1311,11 +1322,21 @@ namespace Server.CustomBots
         // appetite. (The phase check stops the pull from ping-ponging.)
         private void AlertGang(PlayerBot bot, Mobile victim)
         {
+            // Snapshot first: BeginHunt reconfigures another bot while we'd
+            // still be walking the live spatial enumeration.
+            var mates = new List<PlayerBot>();
             foreach (var m in bot.Map.GetMobilesInRange(
                          bot.Location, GangConvergeRange))
             {
-                if (m is not PlayerBot mate || mate == bot) continue;
-                if (mate.Behavior is not PKBehavior pk) continue;
+                if (m is PlayerBot mate && mate != bot)
+                {
+                    mates.Add(mate);
+                }
+            }
+
+            foreach (var mate in mates)
+            {
+                if (mate.Deleted || mate.Behavior is not PKBehavior pk) continue;
                 if (pk._phase != Phase.Patrol) continue;
 
                 bool sameGang = GangId != 0 && pk.GangId == GangId;

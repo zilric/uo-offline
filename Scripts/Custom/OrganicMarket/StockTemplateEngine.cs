@@ -3023,13 +3023,20 @@ public static class StockTemplateEngine
                     SellLoose(vendor, new Sextant(), 120);
                 }
 
-                // SP-060: T2A trophy - a real TaxidermyKit (the ticket's
-                // own offered alternative to a hand-built mounted-fish
-                // deed/addon; TrophyDeed's own real BigFish table lives
-                // as a private field inside TaxidermyKit, not otherwise
-                // constructible without duplicating its internal
-                // ItemID/cliloc numbers).
-                SellLoose(vendor, Named(new TaxidermyKit(), "a taxidermy kit"), 3500);
+                // SP-061: pre-crafted mounted Big Fish wall trophy (the core's
+                // TrophyDeed) replaces SP-060's TaxidermyKit. The BigFish
+                // entry's IDs mirror the private table in TaxidermyKit
+                // (north 0x1E62, west = north + 7, deed cliloc 1041096,
+                // addon cliloc 1041110); that table isn't reachable from here.
+                const int bigFishTrophyNorthId = 0x1E62;
+                SellLoose(
+                    vendor,
+                    new TrophyDeed(
+                        bigFishTrophyNorthId + 7, bigFishTrophyNorthId, 1041096, 1041110,
+                        null, Utility.RandomMinMax(100, 200)
+                    ),
+                    3500
+                );
                 break;
         }
     }

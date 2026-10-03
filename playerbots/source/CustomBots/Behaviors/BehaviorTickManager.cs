@@ -77,7 +77,7 @@ namespace Server.CustomBots
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"PlayerBot tick error on {bot.Name}: {ex.Message}");
+                    Console.WriteLine($"PlayerBot tick error on {bot.Name}: {ex}");
                 }
             }
 
